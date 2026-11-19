@@ -12,7 +12,7 @@ Make video and image generation faster without retraining.
 
 - The paper's idea: start denoising on a cheaper low-resolution grid, then increase the resolution as finer detail becomes useful.
 - This avoids paying for full-resolution compute during the noisiest early steps.
-- **Runs on:** MiniMax-H3 video and flow image models (MOSS Image, Krea 2).
+- **Runs on:** MiniMax-H3 video, MiniMax-H3-Image, and flow image models (MOSS Image, Krea 2).
 - H3 audio always stays at full resolution.
 
 
@@ -89,7 +89,7 @@ The pack has six nodes in two families:
 | Family | For | Wired like | Automatic | Manual | Harvest |
 |---|---|---|---|---|---|
 | **KSampler** | flow image models | KSampler | **SPEED — KSampler** | **SPEED — KSampler (Manual)** | **SPEED — KSampler Sigma Harvest** |
-| **Advanced** | MiniMax-H3 | SamplerCustomAdvanced | **SPEED — Sampler Advanced** | **SPEED — Sampler Advanced (Manual)** | **SPEED — Sigma Harvest Advanced** |
+| **Advanced** | MiniMax-H3, MiniMax-H3-Image, LTX-2.x | SamplerCustomAdvanced | **SPEED — Sampler Advanced** | **SPEED — Sampler Advanced (Manual)** | **SPEED — Sigma Harvest Advanced** |
 
 - **SPEED — KSampler Sigma Harvest** has no `denoise`: it always calibrates on the full schedule.
 
@@ -161,6 +161,12 @@ Most samplers work. The ones that don't, on H3:
 > [!NOTE]
 > `noise_policy` decides where the extra detail comes from at each switch. `coupled_full_grid` takes it from the same seeded noise a plain SamplerCustomAdvanced run uses, so it keeps that run's composition at the same seed. `direct_coarse` (the default) draws its own, so the picture differs from a plain run. On H3 video `coupled_full_grid` saved only 5–10 %, against 15–30 % for `direct_coarse`.
 
+## MiniMax-H3-Image
+
+- Swap the **SamplerCustomAdvanced** after `MiniMaxH3ImageConditioning` for **SPEED Sampler**; it detects the H3-Image model by itself and keeps your guider and sampler (e.g. SamplerLCM).
+- Reference pictures (`minimax_refs`) stay full size at every stage; only the image being made is resized.
+- Run Sigma Harvest on the same graph first. One tested case (2720×1536, SamplerLCM, 6 steps): 31.1 s against 34.7 s stock with 2 stages at Δ 0.05. Use 2 stages: with 6 steps, 3 stages put both switches on one step and fail.
+
 ## LTX-2.x audio+video
 
 - Use the Advanced nodes, Sigma Harvest included, and connect the nested latent from `LTXVConcatAVLatent`; they detect the LTX model by themselves.
@@ -186,9 +192,10 @@ Most samplers work. The ones that don't, on H3:
 | Symptom or error | Fix |
 |---|---|
 | **transition step must be inside the sigma schedule** | A resolution switch would land before the first step or after the last one. Use more steps, or move Manual goals inside the schedule. |
-| **"use SPEED KSampler nodes for image models"** / **"use SPEED Advanced nodes for MiniMax-H3"** | The latent does not fit this node family. Image models go on the KSampler nodes, MiniMax-H3 on the Advanced nodes. |
+| **"use SPEED KSampler nodes for image models"** / **"use SPEED Advanced nodes for MiniMax-H3"** | The latent does not fit this node family. Image models go on the KSampler nodes, MiniMax-H3 on the Advanced nodes. MiniMax-H3-Image runs on either. |
 | **"SPEED KSampler nodes got an LTX-2 audio-video model"** | The KSampler nodes can't run LTX's nested latent. Use the SPEED Advanced nodes. |
-| **MiniMax-H3 sigma shifts are unavailable** | The Advanced nodes need a real MiniMax-H3 model; image models go on the KSampler nodes. |
+| **MiniMax-H3 sigma shifts are unavailable** | The Advanced nodes need a MiniMax-H3, MiniMax-H3-Image or LTX-2.x model; other image models go on the KSampler nodes. |
+| **"SPEED Advanced nodes on MiniMax-H3-Image got a nested video/audio latent"** | Connect the latent from `MiniMaxH3ImageConditioning`. |
 | **noise_amplitude and noise_decay_exponent are not set (0)** | Fill them in; see [Quick start](#quick-start) step 2. |
 | **Nodes marked deprecated** | Workflows saved before the rename use the old `MiniMaxH3*` node IDs. They still run; right-click a node and replace it with the matching `SPEED` node when convenient. |
 | **Text looks blurry / wobbly** | Lower Δ from `0.005` toward `0.001`, or use fewer stages. Both options are more conservative and usually slower. |
@@ -199,7 +206,7 @@ Most samplers work. The ones that don't, on H3:
 - The KSampler nodes need a flow (CONST) model, in Harvest too. Other models, such as EPS or v-prediction checkpoints, are rejected with an error.
 - `noise_mask` / masked denoising is supported for LTX-2.x image-to-video and guides only.
 - On the Advanced nodes the `latent_image` must start empty (both the video and audio streams). SPEED's I2V support comes through MiniMax-H3 keyframe conditioning, which is resized and restored separately.
-- The Advanced nodes expect a nested latent layout (MiniMax-H3 or LTX-2.x): one video stream plus one audio stream, batch size 1.
+- The Advanced nodes expect a nested latent layout (MiniMax-H3 or LTX-2.x): one video stream plus one audio stream, batch size 1. MiniMax-H3-Image is the exception: a plain `[1,24,1,H,W]` latent.
 
 ## Advanced (Optional Reading)
 
