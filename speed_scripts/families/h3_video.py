@@ -1,10 +1,7 @@
 """MiniMax-H3 (``h3_video``) model family.
 
-The H3 latent is a nested video/audio pair: the video stream is the spatial
-stream SPEED resizes, and the audio stream is carried across resolution
-changes on its own sigma clock. This module holds the family class together
-with its unpack/pack helpers, the sigma-shift resolution, and the H3-only
-audio-state math moved from ``speed_scripts/flow.py``.
+The latent is a nested video/audio pair. SPEED resizes the video stream and
+carries the audio stream across resolution changes on its own sigma clock.
 """
 
 from __future__ import annotations
@@ -78,8 +75,8 @@ def unpack_h3(samples):
     """Validate and unpack the H3 nested latent into ``(video, audio)``."""
     if not getattr(samples, "is_nested", False):
         raise ValueError(
-            "model_type h3_video needs a MiniMax-H3 NestedTensor video/audio latent; "
-            "use model_type flow_image for image models"
+            "SPEED Advanced nodes need a MiniMax-H3 NestedTensor video/audio latent; "
+            "use SPEED KSampler nodes for image models"
         )
     streams = list(samples.unbind())
     if len(streams) != 2:
@@ -136,7 +133,8 @@ def resolve_sigma_shifts(guider):
     if shifts is None:
         raise ValueError(
             "active MiniMax-H3 sigma shifts are unavailable: expected "
-            "sigma_shift_video/audio on the H3 model or transformer options"
+            "sigma_shift_video/audio on the H3 model or transformer options. "
+            "SPEED Advanced nodes run MiniMax-H3 only; use SPEED KSampler nodes for image models"
         )
     video_shift, audio_shift = map(float, shifts)
     if video_shift <= 0.0 or audio_shift <= 0.0:
@@ -148,6 +146,9 @@ class H3VideoFamily:
     """MiniMax-H3: resize the video stream, carry audio on its own sigma clock."""
 
     name = "h3_video"
+    nodes = "SPEED Advanced nodes"
+    accepts_source_latent = False
+    scales_reference_latents = False
 
     def __init__(self, guider):
         self.video_shift, self.audio_shift, self.audio_scale = resolve_sigma_shifts(guider)

@@ -1,12 +1,8 @@
 """Run SPEED across several resolution stages.
 
-``run_speed_pipeline`` runs three steps in order: ``families.prepare_family``
-(pick the family, split the empty latent), ``planning.plan_stages`` (stage
-sizes and transition points), then ``run_stages`` (the stage loop). Each stage
-is one ``guider.sample()`` call. Between stages, carry the current state into
-the next size and continue from the aligned sigma. What the latent holds, and
-how its extra streams cross a stage, comes from the model family
-(``families/``).
+Each stage is one ``guider.sample()`` call. Between stages the state grows to
+the next size and continues from the aligned sigma. Latent layout comes from
+the model family.
 """
 
 from __future__ import annotations
@@ -44,14 +40,7 @@ def _build_preview_callback(guider, total_steps, x0_output):
 
 
 class _PreviewGuard:
-    """Run-wide preview-callback state shared by every stage callback.
-
-    The SPEED runtime builds one callback per stage, so any disable state
-    kept inside a single stage's closure would reset at the next stage
-    boundary. Holding it here keeps a failing preview callback disabled
-    for the rest of the run, and the warning fires once on the
-    enabled -> disabled transition instead of once per stage.
-    """
+    """Run-wide preview state, so a failing preview stays disabled across stages and warns once."""
 
     def __init__(self):
         self.disabled = False
@@ -112,6 +101,23 @@ def _coupled_transition(
     return idct_temporal(idct2(target_coefficients)).to(dtype=internal_main.dtype)
 
 
+def _downsample_source(full_main, target_thw):
+    """First-stage source latent: zeros for an empty latent, else the image low-passed to the stage size.
+
+    The DCT low-pass is rescaled to keep the mean, so the coarse image has the
+    same level as the full one; a per-channel affine latent format commutes with it.
+    """
+    target_t, target_h, target_w = target_thw
+    shape = full_main.shape[:-3] + (target_t, target_h, target_w)
+    if not torch.count_nonzero(full_main):
+        return full_main.new_zeros(shape)
+    if target_t != full_main.shape[-3]:
+        raise ValueError("SPEED image-to-image does not support temporal stage scales")
+    source_h, source_w = full_main.shape[-2:]
+    gain = ((target_h * target_w) / (source_h * source_w)) ** 0.5
+    return lowpass_dct(full_main, (target_h, target_w)) * gain
+
+
 def _expand_main(
     internal_main,
     *,
@@ -158,16 +164,19 @@ def run_speed_pipeline(
     preview_callback=None,
     x0_output=None,
 ):
-    """Run the configured SPEED stages.
+    """Run ``prepare_family``, ``plan_stages``, then ``run_stages``.
 
-    ``sampler`` is any ComfyUI SAMPLER. Each stage is its own
-    ``guider.sample()`` call, so a multistep sampler's history starts fresh at
-    every resolution change. ``model_type`` picks the family (see
-    ``families.MODEL_TYPES``). The body is three steps in order:
-    ``families.prepare_family``, ``planning.plan_stages``, then ``run_stages``.
+    ``sampler`` is any ComfyUI SAMPLER. ``model_type`` picks the family.
     """
     prepared = prepare_family(model_type, guider, latent)
     plan = plan_stages(config, sigmas, prepared.main.shape)
+    if len(plan.scales) < len(config.scales):
+        log.info(
+            "[SPEED] sigma schedule starts at %.4f, below the first %d stage threshold(s): running %d stage(s)",
+            float(sigmas[0]),
+            len(config.scales) - len(plan.scales),
+            len(plan.scales),
+        )
     return run_stages(
         noise,
         guider,
@@ -197,24 +206,18 @@ def run_stages(
     preview_callback=None,
     x0_output=None,
 ):
-    """Run the planned stages over the prepared latent.
-
-    ``prepared`` carries the family, the fitted latent dict and its main/extra
-    streams; ``plan`` carries the stage shapes and transition steps. Each stage
-    is one ``guider.sample()`` call; between stages the carried state grows to
-    the next size and continues from the aligned sigma.
-    """
+    """Run the planned stages over the prepared latent."""
     family = prepared.family
     latent = prepared.latent
     full_main = prepared.main
     full_extra = prepared.extra
-    scales = config.scales
+    scales = plan.scales
     stage_shapes = plan.stage_shapes
     transition_steps = plan.transition_steps
 
     working_sigmas = sigmas.clone()
     stage_h, stage_w, stage_t = stage_shapes[0]
-    coarse_main = full_main.new_zeros(full_main.shape[:-3] + (stage_t, stage_h, stage_w))
+    coarse_main = _downsample_source(full_main, (stage_t, stage_h, stage_w))
     stage_start_latent = family.join(coarse_main, _maybe(torch.zeros_like, full_extra))
 
     full_noise_coefficients = None
@@ -240,7 +243,8 @@ def run_stages(
         stock_callback = _build_preview_callback(guider, global_total, x0_output)
     preview_guard = _PreviewGuard()
 
-    walker = LatentWalker(guider)
+    reference_hw = tuple(full_main.shape[-2:]) if family.scales_reference_latents else None
+    walker = LatentWalker(guider, reference_hw)
     global_start = 0
     global_done = 0
 

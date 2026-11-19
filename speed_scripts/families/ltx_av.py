@@ -41,9 +41,12 @@ class LTXAVFamily:
     """LTX-2.x: resize the video stream, carry the audio stream on the same sigma clock."""
 
     name = "ltx_av"
+    nodes = "SPEED Advanced nodes"
+    accepts_source_latent = False
+    scales_reference_latents = False
 
     def __init__(self, guider):
-        require_flow_sampling(guider, "ltx_av")
+        require_flow_sampling(guider, "SPEED Advanced nodes with model_type ltx_av")
 
     def split(self, samples):
         return unpack_ltx(samples)

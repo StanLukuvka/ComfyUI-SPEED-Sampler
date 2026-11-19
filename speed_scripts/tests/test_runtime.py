@@ -1,4 +1,4 @@
-"""run_speed_pipeline end to end: H3 and image runs, noise policies, audio, I2V, failures."""
+"""run_speed_pipeline end to end: H3 and image runs, noise policies, audio, I2V, image-to-image, failures."""
 
 import pytest
 import torch
@@ -117,7 +117,7 @@ SIGMA_ONE_BOUNDARY = torch.tensor([1.0, 1.0, .5, 0.0])
     [
         ({**make_latent(), "noise_mask": torch.ones(1)}, _cfg(), SIGMAS, False, "noise masks"),
         ({"samples": NestedTensor([torch.ones(1, 1, 2, 8, 8), torch.zeros(1, 1, 2, 44)])},
-         _cfg(), SIGMAS, False, "empty input latent"),
+         _cfg(), SIGMAS, False, "SPEED Advanced nodes require an empty input latent"),
         (make_latent(), _cfg(), SIGMAS[:2], False, "one-dimensional schedule"),
         (make_latent(), _cfg((.5, 1.0), (10,)), SIGMAS, False, "inside the sigma schedule"),
         # A boundary at sigma 1 cannot be carried into the next stage.
@@ -311,3 +311,69 @@ def test_image_run_fits_a_generic_empty_latent_to_the_model_first(monkeypatch):
                   latent=image_latent((1, 1, 8, 8)), model_type="flow_image")
     assert seen == [(1, 1, 8, 8)]
     assert out["samples"].shape == (1, 4, 8, 8)
+
+
+
+def test_edit_model_reference_latents_scale_with_each_stage_and_are_restored():
+    # Edit models lay reference_latents on the image's position grid from 0, so a
+    # coarse stage that kept them full size would only see their top-left corner.
+    guider = OracleFlowGuider(torch.zeros(1, 4, 12, 12))
+    references = [torch.rand(1, 4, 12, 12), torch.rand(1, 4, 6, 12)]
+    guider.original_conds = {"positive": [{"reference_latents": list(references)}], "negative": []}
+    held = guider.original_conds["positive"][0]["reference_latents"]
+    seen = []
+    sample = guider.sample
+
+    def recording_sample(*args, **kwargs):
+        seen.append([tuple(latent.shape[-2:]) for latent in held])
+        return sample(*args, **kwargs)
+
+    guider.sample = recording_sample
+    _run(_cfg((1 / 3, 2 / 3, 1.0)), guider, latent=image_latent((1, 4, 12, 12)), model_type="flow_image")
+
+    assert seen == [[(4, 4), (2, 4)], [(8, 8), (4, 8)], [(12, 12), (6, 12)]]
+    assert all(latent is original for latent, original in zip(held, references))
+
+# A small fit whose two coarse thresholds sit at about 0.916 and 0.862 on an 8x8 latent.
+_I2I_FIT = dict(delta=.05, noise_amplitude=2.0, noise_decay_exponent=1.0)
+
+
+@pytest.mark.parametrize("noise_policy", ["direct_coarse", "coupled_full_grid"])
+def test_image_to_image_seeds_the_first_stage_with_the_coarse_source(noise_policy):
+    source = 1.5 + torch.randn((1, 4, 8, 8), generator=torch.Generator().manual_seed(3))
+    guider = OracleFlowGuider(torch.zeros(1, 4, 8, 8))
+    sigmas = torch.linspace(.95, 0.0, 11)
+    _run(_cfg((.5, 1.0), (5,), noise_policy=noise_policy), guider, noise=SeededNoise(7),
+         latent={"samples": source.clone()}, sigmas=sigmas, model_type="flow_image")
+
+    coarse = guider.latents[0]
+    assert coarse.shape == (1, 4, 4, 4)
+    # Mean-preserving low-pass: the coarse image keeps the source's level and low band.
+    assert torch.allclose(coarse.mean(dim=(-2, -1)), source.mean(dim=(-2, -1)), atol=1e-5)
+    assert torch.allclose(coarse, .5 * spectral.lowpass_dct(source, (4, 4)), atol=1e-5)
+    # Later stages re-enter from the carried state, so their source latent is empty.
+    assert not torch.count_nonzero(guider.latents[1])
+
+
+def test_automatic_skips_the_coarse_stages_a_low_starting_sigma_has_already_passed():
+    cfg = SpeedConfig(scales=(.25, .5, 1.0), transition_steps=(), transition_mode="delta_custom", **_I2I_FIT)
+    full = plan_stages(cfg, torch.linspace(1.0, 0.0, 11), (1, 4, 1, 8, 8))
+    assert full.scales == (.25, .5, 1.0) and full.transition_steps == (1, 2)
+
+    one_skipped = plan_stages(cfg, torch.linspace(.88, 0.0, 11), (1, 4, 1, 8, 8))
+    assert one_skipped.scales == (.5, 1.0)
+    assert one_skipped.stage_shapes == ((4, 4, 1), (8, 8, 1))
+    assert one_skipped.transition_steps == (1,)
+
+    # Below every threshold the run is one native full-size stage on the whole schedule.
+    sigmas = torch.linspace(.8, 0.0, 11)
+    guider = OracleFlowGuider(torch.zeros(1, 4, 8, 8))
+    source = torch.randn((1, 4, 8, 8), generator=torch.Generator().manual_seed(4))
+    _run(cfg, guider, latent={"samples": source.clone()}, sigmas=sigmas, model_type="flow_image")
+    assert guider.sigma_calls == [pytest.approx([float(s) for s in sigmas])]
+    assert torch.allclose(guider.latents[0], source, atol=1e-5)
+
+
+def test_manual_transitions_are_not_skipped():
+    plan = plan_stages(_cfg((.5, 1.0), (1,)), torch.linspace(.5, 0.0, 11), (1, 4, 1, 8, 8))
+    assert plan.scales == (.5, 1.0) and plan.transition_steps == (1,)

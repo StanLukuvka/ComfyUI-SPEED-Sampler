@@ -3,6 +3,8 @@
 The model_type mismatch errors are in test_families.py with the other families' errors.
 """
 
+import importlib
+
 import pytest
 import torch
 
@@ -45,3 +47,16 @@ def test_ltx_run_resizes_video_and_keeps_the_audio_shape():
 def test_ltx_audio_is_carried_unchanged(policy):
     audio = torch.randn(1, 8, 25, 16)
     assert LTXAVFamily(ltx_guider()).carry_extra(audio, .8, .6, policy, None) is audio
+
+
+@pytest.mark.parametrize("module,node", [("sampler_node", "SPEEDSampler"), ("sampler_node_manual", "SPEEDSamplerManual")])
+def test_advanced_nodes_pass_their_model_type_choice(monkeypatch, module, node):
+    module = importlib.import_module(module)
+    seen = []
+    monkeypatch.setattr(module, "run_speed_pipeline", lambda *a, **k: seen.append(k["model_type"]))
+    cls = getattr(module, node)
+    kwargs = {"noise_amplitude": 1.0, "noise_decay_exponent": 1.0} if node != "SPEEDSamplerManual" else {}
+    for choice in ("ltx_av", None):
+        cls().sample(None, None, None, torch.linspace(1.0, 0.0, 21), None, model_type=choice, **kwargs)
+    assert seen == ["ltx_av", "h3_video"]
+

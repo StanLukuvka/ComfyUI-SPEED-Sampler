@@ -9,6 +9,9 @@ import torch
 from conftest import EchoNoise, H3Model, NestedTensor, Patcher, StubSampler, model_sampling
 
 harvest_module = importlib.import_module("sampler_sigma_harvest_node")
+ksampler_harvest_module = importlib.import_module("ksampler_sigma_harvest_node")
+# The execution body lives in run_harvest here; the nodes only unpack and delegate.
+harvest_core = importlib.import_module("speed_scripts.harvest")
 
 
 class HarvestGuider:
@@ -42,13 +45,6 @@ class HarvestGuider:
         return out
 
 
-def _ltx_guider():
-    """HarvestGuider on an LTX-2 model: the LTXAV latent format, a flow (CONST) sampling."""
-    guider = HarvestGuider()
-    guider.model_patcher.objects["latent_format"] = type("LTXAV", (), {"latent_dimensions": 3})()
-    return guider
-
-
 def _red_noise(*shape):
     """Seeded noise integrated over H and W, so its power falls off with frequency."""
     return torch.randn(shape, generator=torch.Generator().manual_seed(0)).cumsum(-1).cumsum(-2)
@@ -62,9 +58,11 @@ def _image_latent():
     return {"samples": _red_noise(1, 4, 16, 16)}
 
 
-def _harvest(guider=None, sampler=None, latent=None, **kwargs):
-    kwargs.setdefault("model_type", "h3_video")
-    return harvest_module.SPEEDSigmaHarvest().harvest(
+def _harvest(guider=None, sampler=None, latent=None, model_type="h3_video", **kwargs):
+    node = harvest_module.SPEEDSigmaHarvest()
+    # The node is H3-only; overriding its family exercises run_harvest's other paths.
+    node.MODEL_TYPE = model_type
+    return node.harvest(
         noise=EchoNoise(),
         guider=guider or HarvestGuider(),
         sampler=sampler or StubSampler(),
@@ -86,19 +84,18 @@ def _function_suffix_sampler(name):
 
 
 @pytest.mark.parametrize(
-    "sampler,name,model_type,latent,make_guider",
+    "sampler,name,model_type,latent",
     [
-        (StubSampler("euler"), "euler", "h3_video", _h3_latent, HarvestGuider),
-        (StubSampler("res_multistep"), "res_multistep", "h3_video", _h3_latent, HarvestGuider),
-        (_function_suffix_sampler("dpm_fast"), "dpm_fast", "h3_video", _h3_latent, HarvestGuider),
-        (_ClassNamedSampler(), "_ClassNamedSampler", "h3_video", _h3_latent, HarvestGuider),
-        (StubSampler("euler"), "euler", "flow_image", _image_latent, HarvestGuider),
-        (StubSampler("euler"), "euler", "ltx_av", _h3_latent, _ltx_guider),
+        (StubSampler("euler"), "euler", "h3_video", _h3_latent),
+        (StubSampler("res_multistep"), "res_multistep", "h3_video", _h3_latent),
+        (_function_suffix_sampler("dpm_fast"), "dpm_fast", "h3_video", _h3_latent),
+        (_ClassNamedSampler(), "_ClassNamedSampler", "h3_video", _h3_latent),
+        (StubSampler("euler"), "euler", "flow_image", _image_latent),
     ],
-    ids=["euler", "res_multistep", "function_suffix", "class_name", "flow_image", "ltx_av"],
+    ids=["euler", "res_multistep", "function_suffix", "class_name", "flow_image"],
 )
-def test_harvest_runs_the_given_sampler_once_and_emits_its_calibration(sampler, name, model_type, latent, make_guider):
-    guider = make_guider()
+def test_harvest_runs_the_given_sampler_once_and_emits_its_calibration(sampler, name, model_type, latent):
+    guider = HarvestGuider()
     text, diagnostic = _harvest(guider, sampler, latent(), model_type=model_type, **{"Tolerance (Delta)": .01})
     calibration = json.loads(text)
 
@@ -125,7 +122,7 @@ def test_harvest_runs_the_given_sampler_once_and_emits_its_calibration(sampler, 
 
 def test_harvest_reduces_each_residual_inside_the_callback(monkeypatch):
     reduced = []
-    original = harvest_module.radial_dct_power
+    original = harvest_core.radial_dct_power
 
     def recording(residual):
         reduced.append(residual.shape)
@@ -134,7 +131,7 @@ def test_harvest_reduces_each_residual_inside_the_callback(monkeypatch):
     def check(step):
         assert len(reduced) == step + 1  # reduced before the sampler's next step
 
-    monkeypatch.setattr(harvest_module, "radial_dct_power", recording)
+    monkeypatch.setattr(harvest_core, "radial_dct_power", recording)
     text, _ = _harvest(HarvestGuider(on_step=check))
     assert "error" not in json.loads(text)
     assert len(reduced) == 19
@@ -152,7 +149,7 @@ def test_harvest_reduces_each_residual_inside_the_callback(monkeypatch):
 )
 def test_fit_health_decides_whether_the_report_is_paste_ready(monkeypatch, beta, r2, health, paste_ready):
     monkeypatch.setattr(
-        harvest_module, "fit_power_law", lambda *args: {"A": 1.0, "beta": beta, "r_squared": r2, "n_bins": 8}
+        harvest_core, "fit_power_law", lambda *args: {"A": 1.0, "beta": beta, "r_squared": r2, "n_bins": 8}
     )
     calibration = json.loads(_harvest()[0])
     assert calibration["health"] == health
@@ -179,19 +176,17 @@ def _explode(error=RuntimeError):
         ({"compute_residual": _explode()}, None, {}, "no_captures", "Residual capture failed: bad", "residual capture failed"),
         ({"radial_dct_power": _explode()}, None, {}, "no_spectral_profiles", "Spectral profile reduction failed: bad",
          "spectral profile reduction failed"),
-        # A latent that does not match model_type points at the right setting.
+        # A latent that does not fit the node points at the right nodes.
         ({}, None, {"latent": _image_latent()}, "no_captures",
-         "does not match model_type h3_video; use model_type flow_image", None),
+         "does not fit SPEED Advanced nodes; use SPEED KSampler nodes", None),
         # A plain 5-D latent (Krea 2's [B,C,1,H,W]) is not H3's nested video/audio latent.
         ({}, None, {"latent": {"samples": _red_noise(1, 4, 1, 16, 16)}}, "no_captures",
-         "does not match model_type h3_video; use model_type flow_image", None),
+         "does not fit SPEED Advanced nodes; use SPEED KSampler nodes", None),
         ({}, None, {"model_type": "flow_image"}, "no_captures",
-         "does not match model_type flow_image; use model_type h3_video", None),
-        ({}, _ltx_guider(), {"model_type": "ltx_av", "latent": _image_latent()}, "no_captures",
-         "does not match model_type ltx_av; connect the nested video/audio latent", None),
+         "does not fit SPEED KSampler nodes; use SPEED Advanced nodes", None),
     ],
     ids=["silent_sampler", "sampler_failed", "fit_failed", "residual_failed", "profile_failed",
-         "image_latent_as_h3", "five_d_image_latent_as_h3", "h3_latent_as_image", "image_latent_as_ltx"],
+         "image_latent_as_h3", "five_d_image_latent_as_h3", "h3_latent_as_image"],
 )
 def test_harvest_returns_an_error_json_instead_of_a_calibration(
     monkeypatch, caplog, patch, guider, inputs, error, message, log_text
@@ -200,8 +195,8 @@ def test_harvest_returns_an_error_json_instead_of_a_calibration(
     if patch is None:
         guider.sample = _explode()
     for name, replacement in (patch or {}).items():
-        monkeypatch.setattr(harvest_module, name, replacement)
-    with caplog.at_level("WARNING", logger=harvest_module.__name__):
+        monkeypatch.setattr(harvest_core, name, replacement)
+    with caplog.at_level("WARNING", logger=harvest_core.__name__):
         text, diagnostic = _harvest(guider, StubSampler("dpm_2"), **inputs)
 
     result = json.loads(text)
@@ -221,14 +216,81 @@ def test_harvest_returns_an_error_json_instead_of_a_calibration(
         ({"model_type": "flow_image", "latent": _image_latent(),
           "guider": HarvestGuider(sampling=model_sampling("EPS"))},
          ValueError, r"flow \(CONST\) models only; this model uses EPS"),
-        # Harvest runs the samplers' model_type check against an LTX-2 model.
-        ({"guider": _ltx_guider()}, ValueError, "got an LTX-2 audio-video model .*; use model_type ltx_av"),
-        ({"model_type": "ltx_av"}, ValueError, "model_type ltx_av needs an LTX-2 audio-video model"),
     ],
-    ids=["removed_delta_alias", "unknown_model_type", "non_flow_image_model", "ltx_model_as_h3", "h3_model_as_ltx"],
+    ids=["removed_delta_alias", "unknown_model_type", "non_flow_image_model"],
 )
 def test_harvest_rejects_bad_inputs(inputs, error, match):
     guider = inputs.pop("guider", HarvestGuider())
     with pytest.raises(error, match=match):
         _harvest(guider, **inputs)
+    assert guider.samplers == []
+
+
+def test_ksampler_harvest_passes_the_built_inputs_into_run_harvest(monkeypatch):
+    noise, guider, sampler, sigmas = object(), object(), object(), object()
+    model, positive, negative = object(), object(), object()
+    latent = _h3_latent()
+    built = []
+    recorded = []
+
+    def fake_build(model, seed, steps, cfg, sampler_name, scheduler, positive, negative, denoise=1.0):
+        built.append((model, seed, steps, cfg, sampler_name, scheduler, positive, negative, denoise))
+        return noise, guider, sampler, sigmas
+
+    def fake_run_harvest(noise, guider, sampler, sigmas, latent_image, model_type, delta=0.005, **kwargs):
+        recorded.append((noise, guider, sampler, sigmas, latent_image, model_type, delta))
+        return ("calibration-json", latent)
+
+    monkeypatch.setattr(ksampler_harvest_module, "build_ksampler_inputs", fake_build)
+    monkeypatch.setattr(ksampler_harvest_module, "run_harvest", fake_run_harvest)
+
+    result = ksampler_harvest_module.SPEEDKSamplerHarvest().harvest(
+        model, 7, 20, 8.0, "euler", "normal", positive, negative, latent,
+        **{"Tolerance (Delta)": 0.012},
+    )
+
+    # The KSampler widgets are built into (noise, guider, sampler, sigmas) with
+    # denoise=1.0 (Harvest has no denoise widget), then handed to run_harvest.
+    assert built == [(model, 7, 20, 8.0, "euler", "normal", positive, negative, 1.0)]
+    assert recorded == [(noise, guider, sampler, sigmas, latent, "flow_image", 0.012)]
+    assert result == ("calibration-json", latent)
+
+
+def _ltx_guider():
+    """HarvestGuider on an LTX-2 model: the LTXAV latent format, a flow (CONST) sampling."""
+    guider = HarvestGuider()
+    guider.model_patcher.objects["latent_format"] = type("LTXAV", (), {"latent_dimensions": 3})()
+    return guider
+
+
+def _harvest_choice(guider, latent, model_type):
+    """Harvest through the node's own model_type input (not the MODEL_TYPE override)."""
+    return harvest_module.SPEEDSigmaHarvest().harvest(
+        noise=EchoNoise(), guider=guider, sampler=StubSampler(), sigmas=torch.linspace(1.0, .025, 20),
+        latent_image=latent, model_type=model_type,
+    )
+
+
+def test_harvest_model_type_ltx_av_calibrates_an_ltx_model():
+    calibration = json.loads(_harvest_choice(_ltx_guider(), _h3_latent(), "ltx_av")[0])
+    assert calibration["model_type"] == "ltx_av"
+    assert 0 < calibration["noise_amplitude"] < 1e6
+
+
+def test_harvest_ltx_av_on_a_plain_latent_points_at_the_nested_latent():
+    result = json.loads(_harvest_choice(_ltx_guider(), _image_latent(), "ltx_av")[0])
+    assert result["error"] == "no_captures"
+    assert "connect the nested video/audio latent from LTXVConcatAVLatent" in result["message"]
+
+
+@pytest.mark.parametrize(
+    "guider,model_type,match",
+    [(_ltx_guider, None, "model_type h3_video got an LTX-2 audio-video model .*; use model_type ltx_av"),
+     (HarvestGuider, "ltx_av", "model_type ltx_av needs an LTX-2 audio-video model")],
+    ids=["ltx_model_as_h3", "h3_model_as_ltx"],
+)
+def test_harvest_model_type_mismatch_raises_before_sampling(guider, model_type, match):
+    guider = guider()
+    with pytest.raises(ValueError, match=match):
+        _harvest_choice(guider, _h3_latent(), model_type)
     assert guider.samplers == []

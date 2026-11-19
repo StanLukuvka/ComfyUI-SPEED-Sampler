@@ -22,7 +22,7 @@ def _sampling_name(sampling):
     return " / ".join(bases) or type(sampling).__name__
 
 
-def require_flow_sampling(guider, model_type="flow_image"):
+def require_flow_sampling(guider, who="SPEED KSampler nodes"):
     """Raise unless the guider's model samples as a flow (CONST) model.
 
     Image-to-image flow variants are rejected too: they condition on a source image.
@@ -35,7 +35,7 @@ def require_flow_sampling(guider, model_type="flow_image"):
         (comfy.model_sampling.IMG_TO_IMG_FLOW, comfy.model_sampling.IMG_TO_IMG_VELOCITY),
     ):
         raise ValueError(
-            f"model_type {model_type} supports flow (CONST) models only; "
+            f"{who} support flow (CONST) models only; "
             f"this model uses {_sampling_name(sampling)}"
         )
 
@@ -49,6 +49,11 @@ class FlowImageFamily:
     """
 
     name = "flow_image"
+    nodes = "SPEED KSampler nodes"
+    # Image-to-image: a VAE-encoded latent seeds the first stage, as SamplerCustomAdvanced does.
+    accepts_source_latent = True
+    # Edit models: reference_latents share the image's position grid, so they scale with each stage.
+    scales_reference_latents = True
 
     def __init__(self, guider):
         require_flow_sampling(guider)
@@ -58,7 +63,7 @@ class FlowImageFamily:
 
     def split(self, samples):
         if getattr(samples, "is_nested", False):
-            raise ValueError("model_type flow_image got a nested video/audio latent; use model_type h3_video")
+            raise ValueError(f"{self.nodes} got a nested video/audio latent; use SPEED Advanced nodes for MiniMax-H3")
         single_frame = samples.ndim == 5 and samples.shape[2] == 1
         if samples.ndim == 4 and not self.frame_axis:
             return samples.unsqueeze(2), None
@@ -66,12 +71,12 @@ class FlowImageFamily:
             return samples, None
         if single_frame:
             raise ValueError(
-                "model_type flow_image got a [B,C,1,H,W] latent, but this model's latent format "
+                f"{self.nodes} got a [B,C,1,H,W] latent, but this model's latent format "
                 "is 2-dimensional and takes [B,C,H,W]; use an image empty-latent node"
             )
         expected = "[B,C,1,H,W]" if self.frame_axis else "[B,C,H,W]"
         raise ValueError(
-            f"model_type flow_image expects a {expected} latent for this model; got {list(samples.shape)}"
+            f"{self.nodes} expect a {expected} latent for this model; got {list(samples.shape)}"
         )
 
     def join(self, main, extra):

@@ -1,24 +1,14 @@
-"""Model families SPEED can run, picked with the nodes' ``model_type`` switch.
+"""Model families SPEED can run, picked explicitly by the node, never auto-detected.
 
-A family says how its latent splits into the spatial stream SPEED resizes
-(always ``[B, C, T, H, W]`` here) and any extra stream it carries alongside,
-how to read a stage's output back into the sampler's state, and how the extra
-stream crosses a resolution change.
+Each node class sets a default family with ``MODEL_TYPE``; the Advanced nodes
+also take a ``model_type`` choice (``h3_video`` or ``ltx_av``). ``get_family``
+checks the choice against the model's LTXAV latent format and raises with the
+setting to use on a mismatch.
 
-- ``h3_video``: MiniMax-H3 nested video/audio latent. Audio is carried on its
-  own sigma clock.
-- ``flow_image``: a plain ``[B, C, H, W]`` or ``[B, C, 1, H, W]`` latent from a
-  flow image model (Krea 2, MOSS Image, ...). No extra stream.
-- ``ltx_av``: LTX-2.x nested video/audio latent. Audio shares the video's
-  sigma clock, so it is carried unchanged.
-
-The switch is never auto-detected. ``get_family`` only checks it against the
-model's latent format and raises with the setting to use on a mismatch.
-
-This module holds the family registry (``MODEL_TYPES``, ``get_family``,
-``check_model_type``, ``prepare_latent``, ``prepare_family``) and re-exports
-the public names of the family modules: ``h3_video.py``, ``flow_image.py`` and
-``ltx_av.py``.
+A family splits its latent into the spatial stream SPEED resizes (always
+``[B, C, T, H, W]`` here) and an optional extra stream, reads a stage's output
+back into sampler state, and carries the extra stream across a resolution
+change. This module holds the registry and re-exports the family modules.
 """
 
 from __future__ import annotations
@@ -54,7 +44,7 @@ def prepare_latent(guider, latent):
 
 
 def check_model_type(model_type):
-    """Raise unless ``model_type`` is one of the supported switch values."""
+    """Raise unless ``model_type`` names a known family."""
     if model_type not in _FAMILIES:
         raise ValueError(f"model_type must be one of {MODEL_TYPES}; got {model_type!r}")
     return model_type
@@ -67,6 +57,11 @@ def check_ltx_av_match(model_type, guider):
     here rather than on the missing H3 sigma shifts.
     """
     ltx = is_ltx_av(guider)
+    if ltx and model_type == "flow_image":
+        raise ValueError(
+            "SPEED KSampler nodes got an LTX-2 audio-video model (latent format LTXAV); "
+            "use SPEED Advanced nodes with model_type ltx_av"
+        )
     if ltx and model_type != "ltx_av":
         raise ValueError(
             f"model_type {model_type} got an LTX-2 audio-video model (latent format LTXAV); "
@@ -75,24 +70,19 @@ def check_ltx_av_match(model_type, guider):
     if model_type == "ltx_av" and not ltx:
         raise ValueError(
             "model_type ltx_av needs an LTX-2 audio-video model (latent format LTXAV); "
-            "use model_type h3_video for MiniMax-H3 or flow_image for image models"
+            "use model_type h3_video for MiniMax-H3, or SPEED KSampler nodes for image models"
         )
 
 
 def get_family(model_type, guider):
-    """Build the family for the node's ``model_type`` switch."""
+    """Build the family for a node's ``model_type`` (never auto-detected; a mismatch raises)."""
     check_ltx_av_match(check_model_type(model_type), guider)
     return _FAMILIES[model_type](guider)
 
 
 @dataclass(frozen=True)
 class PreparedLatent:
-    """One family's view of the input latent, ready for planning and running.
-
-    ``latent`` is the dict after ``prepare_latent``; ``main`` and ``extra`` are
-    the streams from ``family.split`` (``extra`` is ``None`` when the family
-    has no extra stream).
-    """
+    """The family plus the fitted latent dict and its ``main``/``extra`` streams (``extra`` may be ``None``)."""
 
     family: H3VideoFamily | FlowImageFamily | LTXAVFamily
     latent: dict
@@ -101,11 +91,9 @@ class PreparedLatent:
 
 
 def prepare_family(model_type, guider, latent) -> PreparedLatent:
-    """Pick the family and split the empty latent, in the runtime's old order.
+    """Pick the family, fit the latent and split it, checking it is unmasked.
 
-    Runs, in order: the noise-mask check, ``get_family``, ``prepare_latent``,
-    ``family.split``, and the empty-latent check. Same error messages as the
-    pre-split runtime.
+    Only a family with ``accepts_source_latent`` takes a non-empty latent (image-to-image).
     """
     if "noise_mask" in latent:
         raise ValueError("SPEED does not support noise masks")
@@ -113,8 +101,9 @@ def prepare_family(model_type, guider, latent) -> PreparedLatent:
     latent = prepare_latent(guider, latent)
 
     main, extra = family.split(latent.get("samples"))
-    if torch.count_nonzero(main) or (extra is not None and torch.count_nonzero(extra)):
-        raise ValueError("SPEED requires an empty input latent")
+    empty = not torch.count_nonzero(main) and (extra is None or not torch.count_nonzero(extra))
+    if not empty and not family.accepts_source_latent:
+        raise ValueError(f"{family.nodes} require an empty input latent")
     return PreparedLatent(family=family, latent=latent, main=main, extra=extra)
 
 
@@ -125,6 +114,7 @@ __all__ = [
     "LTXAVFamily",
     "get_family",
     "is_ltx_av",
+    "unpack_ltx",
     "pack_h3",
     "PreparedLatent",
     "prepare_family",
@@ -132,5 +122,4 @@ __all__ = [
     "require_flow_sampling",
     "resolve_sigma_shifts",
     "unpack_h3",
-    "unpack_ltx",
 ]
