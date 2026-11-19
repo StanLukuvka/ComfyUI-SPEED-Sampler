@@ -8,6 +8,6 @@ Package layout:
 - latent_class.py — generation-local I2V keyframe lifecycle
 - runtime.py — multi-stage SPEED execution
 - families/ — per-model latent handling package: __init__.py registry,
-  h3_video.py, flow_image.py
+  h3_video.py, flow_image.py, ltx_av.py
 - harvest.py — native-sampler calibration math
 """

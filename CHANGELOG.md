@@ -6,6 +6,7 @@ All notable changes to this project are documented here. New releases should be 
 
 ### Added
 
+- Added the `model_type` value `ltx_av` for LTX-2.x audio-video models (`families/ltx_av.py`, `LTXAVFamily`). SPEED resizes the nested latent's video stream and carries the audio unchanged, since LTX gives the audio the video's timestep. The switch is never auto-detected: an LTX model (latent format `LTXAV`) under `h3_video` or `flow_image` raises "use model_type ltx_av" before the H3 sigma-shift lookup, and a non-LTX model under `ltx_av` raises and names `h3_video` / `flow_image`. Smoke-tested on one LTX-2.5 case only: against a plain stock run, band agreement .83 / .61 / .46 (low / mid / high). No quality floor yet, and no local time saving, because the 20.5 GB weights stream from RAM.
 - Added a `sampler` (SAMPLER) input to Automatic, Manual, and Sigma Harvest, fed by KSamplerSelect or any other SAMPLER node.
 - Added a required `model_type` switch (`h3_video`, `flow_image`) to Automatic, Manual, and Sigma Harvest, with no default. `flow_image` runs flow image models such as MOSS Image and Krea 2. Sampler and Harvest both reject non-flow models.
 - Added example workflows `workflows/image_moss_SPEED.json` and `workflows/image_krea2_SPEED.json`, and image-model timings (MOSS Image and Krea 2, `coupled_full_grid`, RTX 5070 Laptop) to `evidence/image_evidence/README.md`; split `evidence/` into `h3_evidence/` and `image_evidence/`.

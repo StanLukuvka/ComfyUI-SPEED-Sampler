@@ -104,7 +104,7 @@ class SPEEDSigmaHarvest:
                 ),
                 "model_type": (
                     list(MODEL_TYPES),
-                    {"tooltip": "Which model family this is. h3_video: MiniMax-H3 nested video+audio latents. flow_image: flow (CONST) image models such as MOSS Image or Krea 2. Required, never auto-detected; a value that does not match the model and latent stops with an error."},
+                    {"tooltip": "Which model family this is. h3_video: MiniMax-H3 nested video+audio latents. flow_image: flow (CONST) image models such as MOSS Image or Krea 2. ltx_av: LTX-2.x nested video+audio latents. Required, never auto-detected; a value that does not match the model and latent stops with an error."},
                 ),
             },
         }
@@ -200,11 +200,11 @@ class SPEEDSigmaHarvest:
             if first_residual_error is not None:
                 message = f"Residual capture failed: {first_residual_error}"
             elif callback_count:
-                hint = (
-                    "use model_type flow_image for image models"
-                    if model_type == "h3_video"
-                    else "use model_type h3_video for MiniMax-H3 video latents"
-                )
+                hint = {
+                    "h3_video": "use model_type flow_image for image models",
+                    "flow_image": "use model_type h3_video for MiniMax-H3 video latents",
+                    "ltx_av": "connect the nested video/audio latent from LTXVConcatAVLatent",
+                }[model_type]
                 message = (
                     f"No per-step residual snapshots recorded. The sampler callback fired "
                     f"{callback_count} times, but its latent does not match model_type "

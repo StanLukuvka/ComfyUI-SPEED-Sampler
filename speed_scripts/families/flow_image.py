@@ -22,7 +22,7 @@ def _sampling_name(sampling):
     return " / ".join(bases) or type(sampling).__name__
 
 
-def require_flow_sampling(guider):
+def require_flow_sampling(guider, model_type="flow_image"):
     """Raise unless the guider's model samples as a flow (CONST) model.
 
     Image-to-image flow variants are rejected too: they condition on a source image.
@@ -35,7 +35,7 @@ def require_flow_sampling(guider):
         (comfy.model_sampling.IMG_TO_IMG_FLOW, comfy.model_sampling.IMG_TO_IMG_VELOCITY),
     ):
         raise ValueError(
-            "model_type flow_image supports flow (CONST) models only; "
+            f"model_type {model_type} supports flow (CONST) models only; "
             f"this model uses {_sampling_name(sampling)}"
         )
 

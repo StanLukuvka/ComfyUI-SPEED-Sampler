@@ -9,10 +9,16 @@ stream crosses a resolution change.
   own sigma clock.
 - ``flow_image``: a plain ``[B, C, H, W]`` or ``[B, C, 1, H, W]`` latent from a
   flow image model (Krea 2, MOSS Image, ...). No extra stream.
+- ``ltx_av``: LTX-2.x nested video/audio latent. Audio shares the video's
+  sigma clock, so it is carried unchanged.
+
+The switch is never auto-detected. ``get_family`` only checks it against the
+model's latent format and raises with the setting to use on a mismatch.
 
 This module holds the family registry (``MODEL_TYPES``, ``get_family``,
 ``check_model_type``, ``prepare_latent``, ``prepare_family``) and re-exports
-the public names of the family modules: ``h3_video.py`` and ``flow_image.py``.
+the public names of the family modules: ``h3_video.py``, ``flow_image.py`` and
+``ltx_av.py``.
 """
 
 from __future__ import annotations
@@ -23,8 +29,9 @@ import torch
 
 from .h3_video import H3VideoFamily, pack_h3, resolve_sigma_shifts, unpack_h3
 from .flow_image import FlowImageFamily, require_flow_sampling
+from .ltx_av import LTXAVFamily, is_ltx_av, unpack_ltx
 
-_FAMILIES = {"h3_video": H3VideoFamily, "flow_image": FlowImageFamily}
+_FAMILIES = {"h3_video": H3VideoFamily, "flow_image": FlowImageFamily, "ltx_av": LTXAVFamily}
 MODEL_TYPES = tuple(_FAMILIES)
 
 
@@ -32,7 +39,7 @@ def prepare_latent(guider, latent):
     """Copy of ``latent`` with the empty latent fitted to the model, as SamplerCustomAdvanced does.
 
     Generic empty-latent nodes (e.g. EmptyLatentImage) give 4 channels; ComfyUI widens
-    them to the model's latent format. Nested (h3_video) latents pass through unchanged.
+    them to the model's latent format. Nested (h3_video, ltx_av) latents pass through unchanged.
     """
     import comfy.sample
 
@@ -53,9 +60,29 @@ def check_model_type(model_type):
     return model_type
 
 
+def check_ltx_av_match(model_type, guider):
+    """Raise when ``model_type`` and an LTX-2.x model (LTXAV latent format) disagree.
+
+    Runs before the family is built, so an LTX model run as ``h3_video`` stops
+    here rather than on the missing H3 sigma shifts.
+    """
+    ltx = is_ltx_av(guider)
+    if ltx and model_type != "ltx_av":
+        raise ValueError(
+            f"model_type {model_type} got an LTX-2 audio-video model (latent format LTXAV); "
+            "use model_type ltx_av"
+        )
+    if model_type == "ltx_av" and not ltx:
+        raise ValueError(
+            "model_type ltx_av needs an LTX-2 audio-video model (latent format LTXAV); "
+            "use model_type h3_video for MiniMax-H3 or flow_image for image models"
+        )
+
+
 def get_family(model_type, guider):
     """Build the family for the node's ``model_type`` switch."""
-    return _FAMILIES[check_model_type(model_type)](guider)
+    check_ltx_av_match(check_model_type(model_type), guider)
+    return _FAMILIES[model_type](guider)
 
 
 @dataclass(frozen=True)
@@ -67,7 +94,7 @@ class PreparedLatent:
     has no extra stream).
     """
 
-    family: H3VideoFamily | FlowImageFamily
+    family: H3VideoFamily | FlowImageFamily | LTXAVFamily
     latent: dict
     main: torch.Tensor
     extra: torch.Tensor | None
@@ -95,7 +122,9 @@ __all__ = [
     "MODEL_TYPES",
     "H3VideoFamily",
     "FlowImageFamily",
+    "LTXAVFamily",
     "get_family",
+    "is_ltx_av",
     "pack_h3",
     "PreparedLatent",
     "prepare_family",
@@ -103,4 +132,5 @@ __all__ = [
     "require_flow_sampling",
     "resolve_sigma_shifts",
     "unpack_h3",
+    "unpack_ltx",
 ]

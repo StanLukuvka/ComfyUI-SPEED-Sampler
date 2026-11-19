@@ -7,7 +7,7 @@
 
 Make MiniMax-H3 video generation faster without retraining. SPEED starts denoising on a cheaper low-resolution grid, then increases the resolution as finer detail becomes useful. This avoids paying for full-resolution compute during the noisiest early steps.
 
-> **MiniMax-H3 video, plus flow image models** (tested on MOSS Image and Krea 2) through the `model_type` switch. H3 audio always stays at full resolution.
+> **MiniMax-H3 video, plus flow image models** (tested on MOSS Image and Krea 2) and **LTX-2.x audio+video** (smoke-tested on LTX-2.5) through the `model_type` switch. H3 audio always stays at full resolution.
 
 ## Installation
 
@@ -18,7 +18,7 @@ git clone https://github.com/StanLukuvka/ComfyUI-MiniMax-H3-SPEED.git
 ```
 
 1. If your workflow already uses **SamplerCustomAdvanced**, replace it with **SPEED — Sampler** and connect the same `noise`, `guider`, `sampler`, `sigmas`, and `latent_image` inputs (`sampler` comes from **KSamplerSelect** or any other SAMPLER node). If you use the basic all-in-one `KSampler`, first split it into ComfyUI's advanced sampling components so those inputs are available.
-2. Set **`model_type`** to your model (`h3_video` or `flow_image`); it has no default. Paste `noise_amplitude` and `noise_decay_exponent` from a Harvest run, or for H3 with Euler use the reference values under Sigma Harvest below; they start at 0, which stops with an error.
+2. Set **`model_type`** to your model (`h3_video`, `flow_image` or `ltx_av`); it has no default. Paste `noise_amplitude` and `noise_decay_exponent` from a Harvest run, or for H3 with Euler use the reference values under Sigma Harvest below; they start at 0, which stops with an error.
 3. Set **`stages = 2`** or **`3`** (default), then queue the workflow.
 
 Or start from the example: [`workflows/video_h3_SPEED.json`](workflows/video_h3_SPEED.json) has Harvest, Automatic and Manual on one set of H3 loaders, in Models, Conditioning, Sampling, SPEED and output groups; only Automatic is active.
@@ -64,6 +64,12 @@ Tested on the 5 s mug clip (turbo LoRA, 8 steps, 2 stages, 0.2 MP on an L40S and
 
 Automatic and Manual return output and denoised LATENTs; Harvest returns calibration JSON plus a diagnostic LATENT.
 
+## LTX-2.x audio+video
+
+Set **`model_type = ltx_av`** on the SPEED node (and on Harvest) for LTX-2.x audio-video models. Wire it like SamplerCustomAdvanced, with the nested latent from `LTXVConcatAVLatent`. SPEED resizes the video; the audio stays at full resolution on the video's sigma clock. There is no shipped calibration: run Harvest with `model_type = ltx_av` first.
+
+This is one smoke-tested LTX-2.5 case: against a plain stock run, SPEED's band agreement was .83 / .61 / .46 (low / mid / high). There is no quality floor yet, and no time saving on an 8 GB laptop GPU, where the 20.5 GB weights stream from RAM.
+
 ## Image models
 
 Set **`model_type = flow_image`** on the SPEED node (and on Harvest) to run a flow image model such as MOSS Image or Krea 2. Wire it like SamplerCustomAdvanced, with an empty latent (`EmptyLatentImage` works: SPEED fits it to the model's channels like SamplerCustomAdvanced does). `model_type` has no default; set it on every SPEED node. A value that does not match the model and latent stops with an error.
@@ -106,7 +112,7 @@ See [evidence/h3_evidence/README.md](evidence/h3_evidence/README.md) for the ful
 ## Troubleshooting
 
 - **A transition falls outside the sigma schedule** → increase your scheduler step count or move Manual transition goals earlier. Every transition must happen after the first sigma and before the final sigma.
-- **"use model_type flow_image" / "use model_type h3_video"** → the `model_type` switch does not match the latent. H3 needs `h3_video`; plain image latents need `flow_image`.
+- **"use model_type flow_image" / "use model_type h3_video" / "use model_type ltx_av"** → the `model_type` switch does not match the model or latent. H3 needs `h3_video`; plain image latents need `flow_image`; LTX-2.x audio-video models need `ltx_av`.
 - **MiniMax-H3 sigma shifts are unavailable** → `model_type h3_video` needs a real MiniMax-H3 model.
 - **noise_amplitude and noise_decay_exponent are not set (0)** → paste the values from a Harvest run for this model, sampler and schedule.
 - **Nodes marked deprecated** → workflows saved before the rename use the old `MiniMaxH3*` node IDs. They still run; right-click a node and replace it with the matching `SPEED` node when convenient.
@@ -115,7 +121,7 @@ See [evidence/h3_evidence/README.md](evidence/h3_evidence/README.md) for the ful
 
 ## Current limitations
 
-- H3 batch size is currently **1**. Image models take any batch size.
+- H3 and LTX batch size is currently **1**. Image models take any batch size.
 - `model_type flow_image` takes single images only (`[B,C,H,W]`, or `[B,C,1,H,W]` for 3-dimensional latent formats such as Krea 2's Wan 2.1 format) and needs a flow (CONST) model, in Harvest too. Other models, such as EPS or v-prediction checkpoints, are rejected with an error. img2img with a non-empty latent is not supported.
 - `noise_mask` / masked denoising is not supported.
 - The `latent_image` must start empty (for H3, both the video and audio streams). SPEED's I2V support comes through MiniMax-H3 keyframe conditioning, which is resized and restored separately.

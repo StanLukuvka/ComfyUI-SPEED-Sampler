@@ -42,6 +42,13 @@ class HarvestGuider:
         return out
 
 
+def _ltx_guider():
+    """HarvestGuider on an LTX-2 model: the LTXAV latent format, a flow (CONST) sampling."""
+    guider = HarvestGuider()
+    guider.model_patcher.objects["latent_format"] = type("LTXAV", (), {"latent_dimensions": 3})()
+    return guider
+
+
 def _red_noise(*shape):
     """Seeded noise integrated over H and W, so its power falls off with frequency."""
     return torch.randn(shape, generator=torch.Generator().manual_seed(0)).cumsum(-1).cumsum(-2)
@@ -79,18 +86,19 @@ def _function_suffix_sampler(name):
 
 
 @pytest.mark.parametrize(
-    "sampler,name,model_type,latent",
+    "sampler,name,model_type,latent,make_guider",
     [
-        (StubSampler("euler"), "euler", "h3_video", _h3_latent),
-        (StubSampler("res_multistep"), "res_multistep", "h3_video", _h3_latent),
-        (_function_suffix_sampler("dpm_fast"), "dpm_fast", "h3_video", _h3_latent),
-        (_ClassNamedSampler(), "_ClassNamedSampler", "h3_video", _h3_latent),
-        (StubSampler("euler"), "euler", "flow_image", _image_latent),
+        (StubSampler("euler"), "euler", "h3_video", _h3_latent, HarvestGuider),
+        (StubSampler("res_multistep"), "res_multistep", "h3_video", _h3_latent, HarvestGuider),
+        (_function_suffix_sampler("dpm_fast"), "dpm_fast", "h3_video", _h3_latent, HarvestGuider),
+        (_ClassNamedSampler(), "_ClassNamedSampler", "h3_video", _h3_latent, HarvestGuider),
+        (StubSampler("euler"), "euler", "flow_image", _image_latent, HarvestGuider),
+        (StubSampler("euler"), "euler", "ltx_av", _h3_latent, _ltx_guider),
     ],
-    ids=["euler", "res_multistep", "function_suffix", "class_name", "flow_image"],
+    ids=["euler", "res_multistep", "function_suffix", "class_name", "flow_image", "ltx_av"],
 )
-def test_harvest_runs_the_given_sampler_once_and_emits_its_calibration(sampler, name, model_type, latent):
-    guider = HarvestGuider()
+def test_harvest_runs_the_given_sampler_once_and_emits_its_calibration(sampler, name, model_type, latent, make_guider):
+    guider = make_guider()
     text, diagnostic = _harvest(guider, sampler, latent(), model_type=model_type, **{"Tolerance (Delta)": .01})
     calibration = json.loads(text)
 
@@ -179,9 +187,11 @@ def _explode(error=RuntimeError):
          "does not match model_type h3_video; use model_type flow_image", None),
         ({}, None, {"model_type": "flow_image"}, "no_captures",
          "does not match model_type flow_image; use model_type h3_video", None),
+        ({}, _ltx_guider(), {"model_type": "ltx_av", "latent": _image_latent()}, "no_captures",
+         "does not match model_type ltx_av; connect the nested video/audio latent", None),
     ],
     ids=["silent_sampler", "sampler_failed", "fit_failed", "residual_failed", "profile_failed",
-         "image_latent_as_h3", "five_d_image_latent_as_h3", "h3_latent_as_image"],
+         "image_latent_as_h3", "five_d_image_latent_as_h3", "h3_latent_as_image", "image_latent_as_ltx"],
 )
 def test_harvest_returns_an_error_json_instead_of_a_calibration(
     monkeypatch, caplog, patch, guider, inputs, error, message, log_text
@@ -211,8 +221,11 @@ def test_harvest_returns_an_error_json_instead_of_a_calibration(
         ({"model_type": "flow_image", "latent": _image_latent(),
           "guider": HarvestGuider(sampling=model_sampling("EPS"))},
          ValueError, r"flow \(CONST\) models only; this model uses EPS"),
+        # Harvest runs the samplers' model_type check against an LTX-2 model.
+        ({"guider": _ltx_guider()}, ValueError, "got an LTX-2 audio-video model .*; use model_type ltx_av"),
+        ({"model_type": "ltx_av"}, ValueError, "model_type ltx_av needs an LTX-2 audio-video model"),
     ],
-    ids=["removed_delta_alias", "unknown_model_type", "non_flow_image_model"],
+    ids=["removed_delta_alias", "unknown_model_type", "non_flow_image_model", "ltx_model_as_h3", "h3_model_as_ltx"],
 )
 def test_harvest_rejects_bad_inputs(inputs, error, match):
     guider = inputs.pop("guider", HarvestGuider())
