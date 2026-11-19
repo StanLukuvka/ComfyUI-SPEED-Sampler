@@ -129,21 +129,17 @@ ADVANCED_MANUAL_ORDER = [
 )
 def test_advanced_nodes_keep_their_input_types_key_order(node, expected):
     spec = _node(node).INPUT_TYPES()
+    assert list(spec) == ["required"]
     assert list(spec["required"]) == expected
-    # Optional inputs come after every saved widget, so old workflows keep their values.
-    assert list(spec.get("optional", {})) == ["model_type"]
+    assert list(spec.get("optional", {})) == []
 
 
-# The Advanced nodes default to MiniMax-H3; LTX-2.x is an explicit, optional, last choice.
 @pytest.mark.parametrize("node", [AUTOMATIC, MANUAL, HARVEST], ids=lambda n: n[1])
-def test_advanced_nodes_choose_h3_video_or_ltx_av_explicitly(node):
+def test_advanced_nodes_run_minimax_h3_with_no_model_type_input(node):
     cls = _node(node)
-    spec = cls.INPUT_TYPES()
     assert cls.MODEL_TYPE == "h3_video"
-    assert "model_type" not in spec["required"]
-    assert list(spec["optional"])[-1] == "model_type"
-    assert spec["optional"]["model_type"][0] == ["h3_video", "ltx_av"]
-    assert spec["optional"]["model_type"][1]["default"] == "h3_video"
+    assert "model_type" not in cls.INPUT_TYPES()["required"]
+    assert "model_type" not in inspect.signature(getattr(cls, cls.FUNCTION)).parameters
 
 
 @pytest.mark.parametrize("node", [AUTOMATIC, MANUAL, HARVEST], ids=lambda n: n[1])

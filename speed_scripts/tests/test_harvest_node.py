@@ -263,34 +263,21 @@ def _ltx_guider():
     return guider
 
 
-def _harvest_choice(guider, latent, model_type):
-    """Harvest through the node's own model_type input (not the MODEL_TYPE override)."""
+def _harvest_unset(guider, latent):
+    """Harvest through the Advanced node as a user wires it: no family setting."""
     return harvest_module.SPEEDSigmaHarvest().harvest(
         noise=EchoNoise(), guider=guider, sampler=StubSampler(), sigmas=torch.linspace(1.0, .025, 20),
-        latent_image=latent, model_type=model_type,
+        latent_image=latent,
     )
 
 
-def test_harvest_model_type_ltx_av_calibrates_an_ltx_model():
-    calibration = json.loads(_harvest_choice(_ltx_guider(), _h3_latent(), "ltx_av")[0])
+def test_harvest_detects_and_calibrates_an_ltx_model():
+    calibration = json.loads(_harvest_unset(_ltx_guider(), _h3_latent())[0])
     assert calibration["model_type"] == "ltx_av"
     assert 0 < calibration["noise_amplitude"] < 1e6
 
 
-def test_harvest_ltx_av_on_a_plain_latent_points_at_the_nested_latent():
-    result = json.loads(_harvest_choice(_ltx_guider(), _image_latent(), "ltx_av")[0])
+def test_harvest_on_ltx_with_a_plain_latent_points_at_the_nested_latent():
+    result = json.loads(_harvest_unset(_ltx_guider(), _image_latent())[0])
     assert result["error"] == "no_captures"
     assert "connect the nested video/audio latent from LTXVConcatAVLatent" in result["message"]
-
-
-@pytest.mark.parametrize(
-    "guider,model_type,match",
-    [(_ltx_guider, None, "model_type h3_video got an LTX-2 audio-video model .*; use model_type ltx_av"),
-     (HarvestGuider, "ltx_av", "model_type ltx_av needs an LTX-2 audio-video model")],
-    ids=["ltx_model_as_h3", "h3_model_as_ltx"],
-)
-def test_harvest_model_type_mismatch_raises_before_sampling(guider, model_type, match):
-    guider = guider()
-    with pytest.raises(ValueError, match=match):
-        _harvest_choice(guider, _h3_latent(), model_type)
-    assert guider.samplers == []

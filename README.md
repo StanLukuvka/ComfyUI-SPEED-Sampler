@@ -163,10 +163,10 @@ Most samplers work. The ones that don't, on H3:
 
 ## LTX-2.x audio+video
 
-- Set `model_type` to `ltx_av` on the Advanced nodes (it defaults to `h3_video`), including Sigma Harvest, and connect the nested latent from `LTXVConcatAVLatent`.
+- Use the Advanced nodes, Sigma Harvest included, and connect the nested latent from `LTXVConcatAVLatent`; they detect the LTX model by themselves.
 - SPEED resizes the video; the audio stays at full resolution on the video's sigma clock.
-- There is no shipped calibration: run Sigma Harvest with `model_type` `ltx_av` first.
-- This is one smoke-tested LTX-2.5 case: against a plain stock run, band agreement was .83 / .61 / .46 (low / mid / high). There is no quality floor yet, and no time saving on an 8 GB laptop GPU, where the 20.5 GB weights stream from RAM.
+- There is no shipped calibration: run Sigma Harvest on your LTX workflow first.
+- Tested on one LTX-2.5 t2v case (1280×704, 121 frames, euler, 3 stages) on an 8 GB laptop GPU: 92 s against 138 s stock, a clean clip with the same shot. There is no quality floor yet.
 
 ## Image models
 
@@ -186,7 +186,7 @@ Most samplers work. The ones that don't, on H3:
 |---|---|
 | **transition step must be inside the sigma schedule** | A resolution switch would land before the first step or after the last one. Use more steps, or move Manual goals inside the schedule. |
 | **"use SPEED KSampler nodes for image models"** / **"use SPEED Advanced nodes for MiniMax-H3"** | The latent does not fit this node family. Image models go on the KSampler nodes, MiniMax-H3 on the Advanced nodes. |
-| **"use model_type ltx_av"** / **"model_type ltx_av needs an LTX-2 audio-video model"** | The Advanced nodes' `model_type` does not match the model. LTX-2.x needs `ltx_av`; MiniMax-H3 needs `h3_video`. |
+| **"SPEED KSampler nodes got an LTX-2 audio-video model"** | The KSampler nodes can't run LTX's nested latent. Use the SPEED Advanced nodes. |
 | **MiniMax-H3 sigma shifts are unavailable** | The Advanced nodes need a real MiniMax-H3 model; image models go on the KSampler nodes. |
 | **noise_amplitude and noise_decay_exponent are not set (0)** | Fill them in; see [Quick start](#quick-start) step 2. |
 | **Nodes marked deprecated** | Workflows saved before the rename use the old `MiniMaxH3*` node IDs. They still run; right-click a node and replace it with the matching `SPEED` node when convenient. |

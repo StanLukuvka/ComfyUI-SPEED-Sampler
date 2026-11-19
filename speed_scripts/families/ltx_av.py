@@ -25,15 +25,15 @@ def is_ltx_av(guider):
 def unpack_ltx(samples):
     """Validate and unpack the LTX nested latent into ``(video, audio)``."""
     if not getattr(samples, "is_nested", False):
-        raise ValueError("model_type ltx_av needs the nested video/audio latent (LTXVConcatAVLatent)")
+        raise ValueError("LTX-2 needs the nested video/audio latent (LTXVConcatAVLatent)")
     streams = list(samples.unbind())
     if len(streams) != 2:
-        raise ValueError("model_type ltx_av requires exactly video and audio streams")
+        raise ValueError("LTX-2 latents need exactly video and audio streams")
     video, audio = streams
     if video.ndim != 5 or audio.ndim != 4:
-        raise ValueError("model_type ltx_av expects LTX video [B,C,T,H,W] and audio [B,C,T,F]")
+        raise ValueError("LTX-2 expects video [B,C,T,H,W] and audio [B,C,T,F]")
     if video.shape[0] != 1 or audio.shape[0] != 1:
-        raise ValueError("model_type ltx_av supports batch size one")
+        raise ValueError("LTX-2 supports batch size one")
     return video, audio
 
 
@@ -46,7 +46,7 @@ class LTXAVFamily:
     scales_reference_latents = False
 
     def __init__(self, guider):
-        require_flow_sampling(guider, "SPEED Advanced nodes with model_type ltx_av")
+        require_flow_sampling(guider, "SPEED Advanced nodes on LTX-2")
 
     def split(self, samples):
         return unpack_ltx(samples)

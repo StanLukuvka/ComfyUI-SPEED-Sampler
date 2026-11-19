@@ -117,8 +117,9 @@ def run_harvest(
     Returns:
         tuple[str, dict]: (output_json, output_latent)
     """
-    # get_family validates model_type and runs the family's own checks.
+    # get_family validates model_type, detects LTX-2.x and runs the family's own checks.
     family = get_family(model_type, guider)
+    model_type = family.name
 
     callback_count = 0
     capture_count = 0

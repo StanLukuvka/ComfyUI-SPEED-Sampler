@@ -1,9 +1,7 @@
-"""Model families SPEED can run, picked explicitly by the node, never auto-detected.
+"""Model families SPEED can run; each node class fixes its family with ``MODEL_TYPE``.
 
-Each node class sets a default family with ``MODEL_TYPE``; the Advanced nodes
-also take a ``model_type`` choice (``h3_video`` or ``ltx_av``). ``get_family``
-checks the choice against the model's LTXAV latent format and raises with the
-setting to use on a mismatch.
+The one exception is LTX-2.x: the Advanced nodes (``h3_video``) detect its LTXAV
+latent format and run ``ltx_av`` instead (``resolve_model_type``).
 
 A family splits its latent into the spatial stream SPEED resizes (always
 ``[B, C, T, H, W]`` here) and an optional extra stream, reads a stage's output
@@ -50,34 +48,29 @@ def check_model_type(model_type):
     return model_type
 
 
-def check_ltx_av_match(model_type, guider):
-    """Raise when ``model_type`` and an LTX-2.x model (LTXAV latent format) disagree.
+def resolve_model_type(model_type, guider):
+    """The family to run: ``ltx_av`` for an LTX-2.x model (LTXAV latent format), else ``model_type``.
 
-    Runs before the family is built, so an LTX model run as ``h3_video`` stops
-    here rather than on the missing H3 sigma shifts.
+    The Advanced nodes (``h3_video``) pick up LTX by themselves; the KSampler
+    nodes (``flow_image``) can't run its nested latent and raise. Runs before
+    the family is built, so an LTX model never reaches the H3 sigma-shift lookup.
     """
-    ltx = is_ltx_av(guider)
-    if ltx and model_type == "flow_image":
+    model_type = check_model_type(model_type)
+    if not is_ltx_av(guider):
+        if model_type == "ltx_av":
+            raise ValueError("ltx_av needs an LTX-2 audio-video model (latent format LTXAV)")
+        return model_type
+    if model_type == "flow_image":
         raise ValueError(
             "SPEED KSampler nodes got an LTX-2 audio-video model (latent format LTXAV); "
-            "use SPEED Advanced nodes with model_type ltx_av"
+            "use the SPEED Advanced nodes (SPEED Sampler, Manual, Sigma Harvest)"
         )
-    if ltx and model_type != "ltx_av":
-        raise ValueError(
-            f"model_type {model_type} got an LTX-2 audio-video model (latent format LTXAV); "
-            "use model_type ltx_av"
-        )
-    if model_type == "ltx_av" and not ltx:
-        raise ValueError(
-            "model_type ltx_av needs an LTX-2 audio-video model (latent format LTXAV); "
-            "use model_type h3_video for MiniMax-H3, or SPEED KSampler nodes for image models"
-        )
+    return "ltx_av"
 
 
 def get_family(model_type, guider):
-    """Build the family for a node's ``model_type`` (never auto-detected; a mismatch raises)."""
-    check_ltx_av_match(check_model_type(model_type), guider)
-    return _FAMILIES[model_type](guider)
+    """Build the family for a node's ``MODEL_TYPE``; an LTX-2.x model gets ``ltx_av``."""
+    return _FAMILIES[resolve_model_type(model_type, guider)](guider)
 
 
 @dataclass(frozen=True)
@@ -113,6 +106,7 @@ __all__ = [
     "FlowImageFamily",
     "LTXAVFamily",
     "get_family",
+    "resolve_model_type",
     "is_ltx_av",
     "unpack_ltx",
     "pack_h3",

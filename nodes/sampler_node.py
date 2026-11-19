@@ -8,7 +8,6 @@ from speed_scripts.node_widgets import (
     ADVANCED_BASE_INPUTS,
     SAMPLER_INPUT_AUTOMATIC,
     SPEED_AUTOMATIC_WIDGETS,
-    ADVANCED_MODEL_TYPE,
 )
 from speed_scripts.runtime import run_speed_pipeline
 from speed_scripts.planning import build_automatic_speed_config
@@ -30,7 +29,7 @@ class SPEEDSampler:
     )
     FUNCTION = "sample"
     CATEGORY = "sampling/speed"
-    # The node's default family; the Advanced nodes' model_type input picks h3_video or ltx_av.
+    # The node decides the model family: the Advanced nodes run MiniMax-H3 (LTX-2.x is detected).
     MODEL_TYPE = "h3_video"
 
     @classmethod
@@ -45,7 +44,7 @@ class SPEEDSampler:
             "latent_image": ADVANCED_BASE_INPUTS["latent_image"],
         }
         required.update(SPEED_AUTOMATIC_WIDGETS)
-        return {"required": required, "optional": {"model_type": ADVANCED_MODEL_TYPE}}
+        return {"required": required}
 
     def sample(
         self,
@@ -59,7 +58,6 @@ class SPEEDSampler:
         stages=3,
         noise_policy="direct_coarse",
         seed_offset=10000,
-        model_type=None,
         **kwargs,
     ):
         delta = kwargs.pop("Tolerance (Delta)", 0.005)
@@ -89,7 +87,7 @@ class SPEEDSampler:
             latent_image,
             config,
             sampler=sampler,
-            model_type=model_type or self.MODEL_TYPE,
+            model_type=self.MODEL_TYPE,
             disable_pbar=not comfy.utils.PROGRESS_BAR_ENABLED,
         )
 

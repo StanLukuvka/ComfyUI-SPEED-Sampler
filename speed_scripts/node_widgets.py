@@ -87,18 +87,6 @@ SAMPLER_INPUT_MANUAL: tuple[str, dict[str, Any]] = (
     {"tooltip": "Any ComfyUI SAMPLER (e.g. from KSamplerSelect). Any sampler works; Euler is the one SPEED was measured with."},
 )
 
-# The Advanced nodes' model family, chosen explicitly (never auto-detected). Optional and last,
-# so saved workflows keep their widget positions and load as h3_video.
-ADVANCED_MODEL_TYPE: tuple[Any, dict[str, Any]] = (
-    ["h3_video", "ltx_av"],
-    {
-        "default": "h3_video",
-        "tooltip": "Which model family this is. h3_video: MiniMax-H3 nested video+audio latents. "
-                   "ltx_av: LTX-2.x nested video+audio latents. Never auto-detected; a value that "
-                   "does not match the model stops with an error.",
-    },
-)
-
 # Automatic mode widgets.
 SPEED_AUTOMATIC_WIDGETS: dict[str, tuple[Any, dict[str, Any]]] = {
     "stages": (

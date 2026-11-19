@@ -6,7 +6,7 @@ residual spectrum, not the clean-data spectrum from the SPEED paper.
 """
 
 from speed_scripts.harvest import run_harvest
-from speed_scripts.node_widgets import ADVANCED_MODEL_TYPE, SPEED_HARVEST_WIDGETS
+from speed_scripts.node_widgets import SPEED_HARVEST_WIDGETS
 
 
 class SPEEDSigmaHarvest:
@@ -27,7 +27,7 @@ class SPEEDSigmaHarvest:
         "Latent from the native full-resolution pass, for inspection only. Not a SPEED result.",
     )
     FUNCTION = "harvest"
-    # The node's default family; the Advanced nodes' model_type input picks h3_video or ltx_av.
+    # The node decides the model family: the Advanced nodes run MiniMax-H3 (LTX-2.x is detected).
     MODEL_TYPE = "h3_video"
     CATEGORY = "sampling/speed/diagnostics"
     OUTPUT_NODE = False
@@ -58,7 +58,6 @@ class SPEEDSigmaHarvest:
                 ),
                 **SPEED_HARVEST_WIDGETS,
             },
-            "optional": {"model_type": ADVANCED_MODEL_TYPE},
         }
 
     def harvest(
@@ -72,11 +71,10 @@ class SPEEDSigmaHarvest:
     ):
 
         delta = float(kwargs.pop("Tolerance (Delta)", 0.005))
-        model_type = kwargs.pop("model_type", None) or self.MODEL_TYPE
         if kwargs:
             unexpected = ", ".join(sorted(kwargs))
             raise TypeError(f"Unexpected Harvest option(s): {unexpected}")
-        return run_harvest(noise, guider, sampler, sigmas, latent_image, model_type, delta)
+        return run_harvest(noise, guider, sampler, sigmas, latent_image, self.MODEL_TYPE, delta)
 
 class MiniMaxH3HarvestToConfig(SPEEDSigmaHarvest):
     """Deprecated ID for ``SPEEDSigmaHarvest``, kept so saved workflows still load."""

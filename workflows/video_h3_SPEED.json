@@ -753,12 +753,10 @@
         "Node name for S&R": "SPEEDSigmaHarvest"
       },
       "widgets_values": [
-        0.005,
-        "h3_video"
+        0.005
       ],
       "widgets_values_named": {
-        "Tolerance (Delta)": 0.005,
-        "model_type": "h3_video"
+        "Tolerance (Delta)": 0.005
       }
     },
     {
@@ -829,8 +827,7 @@
         0.005,
         35.4213,
         1.0126,
-        10000,
-        "h3_video"
+        10000
       ],
       "widgets_values_named": {
         "stages": 3,
@@ -838,8 +835,7 @@
         "Tolerance (Delta)": 0.005,
         "noise_amplitude": 35.4213,
         "noise_decay_exponent": 1.0126,
-        "seed_offset": 10000,
-        "model_type": "h3_video"
+        "seed_offset": 10000
       }
     },
     {
@@ -915,8 +911,7 @@
         7,
         1,
         0,
-        0,
-        "h3_video"
+        0
       ],
       "widgets_values_named": {
         "noise_policy": "direct_coarse",
@@ -929,8 +924,7 @@
         "transition_goal_3": 7,
         "transition_resolution_3": 1,
         "transition_goal_4": 0,
-        "transition_resolution_4": 0,
-        "model_type": "h3_video"
+        "transition_resolution_4": 0
       }
     },
     {

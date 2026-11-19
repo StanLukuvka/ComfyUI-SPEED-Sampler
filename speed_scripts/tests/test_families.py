@@ -54,27 +54,25 @@ def _image_guider(sampling=None, latent_dimensions=2):
          r"expect a \[B,C,1,H,W\] latent for this model; got \[1, 4, 8, 8\]"),
         ("flow_image", _image_guider(), image_latent((1, 4, 3, 8, 8)),
          r"expect a \[B,C,H,W\] latent for this model; got \[1, 4, 3, 8, 8\]"),
-        # An LTX model is checked against the choice first, before H3's sigma-shift lookup.
-        ("h3_video", _guider(ltx_patcher()), _ltx_latent(),
-         r"model_type h3_video got an LTX-2 audio-video model \(latent format LTXAV\); use model_type ltx_av$"),
+        # The Advanced nodes detect LTX by themselves; the KSampler nodes point to them.
         ("flow_image", _guider(ltx_patcher()), _ltx_latent(),
-         r"SPEED KSampler nodes got an LTX-2 .*; use SPEED Advanced nodes with model_type ltx_av$"),
+         r"SPEED KSampler nodes got an LTX-2 .*; use the SPEED Advanced nodes \(SPEED Sampler, Manual, Sigma Harvest\)$"),
         ("ltx_av", EchoGuider(), make_latent(),
-         "model_type ltx_av needs an LTX-2 audio-video model .*; use model_type h3_video for MiniMax-H3"),
-        ("ltx_av", _guider(ltx_patcher()), image_latent((1, 128, 3, 8, 8)),
-         r"model_type ltx_av needs the nested video/audio latent \(LTXVConcatAVLatent\)"),
-        ("ltx_av", _guider(ltx_patcher()), {"samples": NestedTensor([torch.zeros(1, 128, 3, 8, 8), torch.zeros(1, 8, 25)])},
-         r"model_type ltx_av expects LTX video \[B,C,T,H,W\] and audio \[B,C,T,F\]"),
-        ("ltx_av", _guider(Patcher(object(), model_sampling=model_sampling("ModelSamplingDiscrete", "EPS"),
-                                   latent_format=ltx_patcher().objects["latent_format"])), _ltx_latent(),
-         r"SPEED Advanced nodes with model_type ltx_av support flow \(CONST\) models only; "
+         r"ltx_av needs an LTX-2 audio-video model \(latent format LTXAV\)$"),
+        ("h3_video", _guider(ltx_patcher()), image_latent((1, 128, 3, 8, 8)),
+         r"LTX-2 needs the nested video/audio latent \(LTXVConcatAVLatent\)"),
+        ("h3_video", _guider(ltx_patcher()), {"samples": NestedTensor([torch.zeros(1, 128, 3, 8, 8), torch.zeros(1, 8, 25)])},
+         r"LTX-2 expects video \[B,C,T,H,W\] and audio \[B,C,T,F\]"),
+        ("h3_video", _guider(Patcher(object(), model_sampling=model_sampling("ModelSamplingDiscrete", "EPS"),
+                                     latent_format=ltx_patcher().objects["latent_format"])), _ltx_latent(),
+         r"SPEED Advanced nodes on LTX-2 support flow \(CONST\) models only; "
          r"this model uses ModelSamplingDiscrete / EPS$"),
         # H3 reads its sigma shifts from the model, never from a generic sampling shift.
         ("h3_video", _guider(Patcher(object(), model_sampling=type("S", (), {"shift": 1.0})())), make_latent(),
          "MiniMax-H3 sigma shifts are unavailable.*use SPEED KSampler nodes for image models"),
     ],
     ids=["image_on_h3", "h3_on_image", "unknown", "eps", "img2img_flow", "img2img_velocity",
-         "rank_2d_format", "rank_3d_format", "multi_frame", "ltx_on_h3", "ltx_on_image", "h3_on_ltx",
+         "rank_2d_format", "rank_3d_format", "multi_frame", "ltx_on_image", "ltx_av_on_h3",
          "plain_on_ltx", "ltx_audio_rank", "ltx_eps", "non_h3_model"],
 )
 def test_family_errors_name_the_node_to_use(model_type, guider, latent, error):
