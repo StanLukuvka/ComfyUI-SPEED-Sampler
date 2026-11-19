@@ -165,6 +165,7 @@ Most samplers work. The ones that don't, on H3:
 
 - Use the Advanced nodes, Sigma Harvest included, and connect the nested latent from `LTXVConcatAVLatent`; they detect the LTX model by themselves.
 - SPEED resizes the video; the audio stays at full resolution on the video's sigma clock.
+- Image-to-video and guides (`LTXVImgToVideo`, `LTXVImgToVideoInplace`, `LTXVAddGuide`) are not supported: they add a noise mask, and SPEED stops with "SPEED does not support noise masks".
 - There is no shipped calibration: run Sigma Harvest on your LTX workflow first.
 - Tested on one LTX-2.5 t2v case (1280×704, 121 frames, euler, 3 stages) on an 8 GB laptop GPU: 92 s against 138 s stock, a clean clip with the same shot. There is no quality floor yet.
 

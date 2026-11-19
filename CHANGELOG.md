@@ -75,7 +75,7 @@ V2 updates the SPEED nodes and reworks several parts of the implementation.
 
 ### Removed
 
-- Removed the `model_type` widget. The Advanced nodes (and the deprecated `MiniMaxH3*` IDs) run MiniMax-H3 only; the KSampler nodes run flow image models only. **Breaking for saved workflows:** workflows saved with the widget load with every later widget value shifted by one; re-enter the SPEED widgets or load the updated example workflows.
+- Removed the `model_type` widget. The Advanced nodes (and the deprecated `MiniMaxH3*` IDs) run MiniMax-H3 (or LTX-2.x, detected by its latent format); the KSampler nodes run flow image models only. **Breaking for saved workflows:** workflows saved with the widget load with every later widget value shifted by one; re-enter the SPEED widgets or load the updated example workflows.
 - Removed legacy planner/walker shims, alternate Tolerance aliases, and Harvest compatibility paths.
 - Removed V1 Automatic preset names; Automatic now uses only the explicit `stages` selector.
 - Removed the old `nodes_common.py` helper layer.
