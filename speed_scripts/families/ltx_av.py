@@ -42,7 +42,10 @@ class LTXAVFamily:
 
     name = "ltx_av"
     nodes = "SPEED Advanced nodes"
-    accepts_source_latent = False
+    # Image-to-video (LTXVImgToVideo*, LTXVAddGuide): the image frames are written into the
+    # latent and pinned by its noise_mask, which ComfyUI resizes to each stage's latent.
+    accepts_source_latent = True
+    accepts_noise_mask = True
     scales_reference_latents = False
 
     def __init__(self, guider):

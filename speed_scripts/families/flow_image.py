@@ -52,6 +52,7 @@ class FlowImageFamily:
     nodes = "SPEED KSampler nodes"
     # Image-to-image: a VAE-encoded latent seeds the first stage, as SamplerCustomAdvanced does.
     accepts_source_latent = True
+    accepts_noise_mask = False
     # Edit models: reference_latents share the image's position grid, so they scale with each stage.
     scales_reference_latents = True
 

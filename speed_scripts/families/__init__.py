@@ -84,13 +84,14 @@ class PreparedLatent:
 
 
 def prepare_family(model_type, guider, latent) -> PreparedLatent:
-    """Pick the family, fit the latent and split it, checking it is unmasked.
+    """Pick the family, fit the latent and split it.
 
-    Only a family with ``accepts_source_latent`` takes a non-empty latent (image-to-image).
+    Only a family with ``accepts_source_latent`` takes a non-empty latent (image-to-image),
+    and only one with ``accepts_noise_mask`` takes a ``noise_mask`` (LTX image-to-video).
     """
-    if "noise_mask" in latent:
-        raise ValueError("SPEED does not support noise masks")
     family = get_family(model_type, guider)
+    if "noise_mask" in latent and not family.accepts_noise_mask:
+        raise ValueError("SPEED does not support noise masks")
     latent = prepare_latent(guider, latent)
 
     main, extra = family.split(latent.get("samples"))
