@@ -40,6 +40,19 @@ def require_flow_sampling(guider, who="SPEED KSampler nodes"):
         )
 
 
+def is_h3_image(guider):
+    """True when the guider's model is MiniMax-H3-Image (latent format ``MiniMaxH3Video``).
+
+    H3-Image is a flow (CONST) image model with a plain ``[B, C, 1, H, W]`` latent;
+    the H3 video+audio model uses ``MiniMaxH3AV`` and a nested latent.
+    """
+    try:
+        latent_format = guider.model_patcher.get_model_object("latent_format")
+    except AttributeError:  # a guider or patcher stand-in without the lookup
+        return False
+    return type(latent_format).__name__ == "MiniMaxH3Video"
+
+
 class FlowImageFamily:
     """Flow image models: one spatial latent, resized on its own.
 
@@ -50,6 +63,8 @@ class FlowImageFamily:
 
     name = "flow_image"
     nodes = "SPEED KSampler nodes"
+    # What to connect instead when the latent does not fit (split, Harvest).
+    latent_hint = "use SPEED Advanced nodes for MiniMax-H3 video latents"
     # Image-to-image: a VAE-encoded latent seeds the first stage, as SamplerCustomAdvanced does.
     accepts_source_latent = True
     accepts_noise_mask = False
@@ -57,14 +72,14 @@ class FlowImageFamily:
     scales_reference_latents = True
 
     def __init__(self, guider):
-        require_flow_sampling(guider)
+        require_flow_sampling(guider, self.nodes)
         self.model = _model(guider)
         latent_format = guider.model_patcher.get_model_object("latent_format")
         self.frame_axis = getattr(latent_format, "latent_dimensions", 2) == 3
 
     def split(self, samples):
         if getattr(samples, "is_nested", False):
-            raise ValueError(f"{self.nodes} got a nested video/audio latent; use SPEED Advanced nodes for MiniMax-H3")
+            raise ValueError(f"{self.nodes} got a nested video/audio latent; {self.latent_hint}")
         single_frame = samples.ndim == 5 and samples.shape[2] == 1
         if samples.ndim == 4 and not self.frame_axis:
             return samples.unsqueeze(2), None
@@ -99,3 +114,14 @@ class FlowImageFamily:
 
     def carry_extra(self, extra, old_sigma, new_sigma, policy, x0):
         return None
+
+
+class H3ImageFamily(FlowImageFamily):
+    """MiniMax-H3-Image on the Advanced nodes: the ``flow_image`` family, with errors that name those nodes.
+
+    Its references ride in ``minimax_refs``, which keep their own grid, so they stay
+    full size at every stage (``LatentWalker`` resizes only ``reference_latents``).
+    """
+
+    nodes = "SPEED Advanced nodes on MiniMax-H3-Image"
+    latent_hint = "connect the latent from MiniMaxH3ImageConditioning"

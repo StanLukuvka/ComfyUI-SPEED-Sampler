@@ -1,7 +1,9 @@
 """Model families SPEED can run; each node class fixes its family with ``MODEL_TYPE``.
 
-The one exception is LTX-2.x: the Advanced nodes (``h3_video``) detect its LTXAV
-latent format and run ``ltx_av`` instead (``resolve_model_type``).
+The exceptions are detected by latent format (``resolve_model_type``): the Advanced
+nodes (``h3_video``) run ``ltx_av`` for LTX-2.x (LTXAV) and ``flow_image`` for
+MiniMax-H3-Image (MiniMaxH3Video), so an H3-Image SamplerCustomAdvanced graph keeps
+its own guider and sampler.
 
 A family splits its latent into the spatial stream SPEED resizes (always
 ``[B, C, T, H, W]`` here) and an optional extra stream, reads a stage's output
@@ -16,7 +18,7 @@ from dataclasses import dataclass
 import torch
 
 from .h3_video import H3VideoFamily, pack_h3, resolve_sigma_shifts, unpack_h3
-from .flow_image import FlowImageFamily, require_flow_sampling
+from .flow_image import FlowImageFamily, H3ImageFamily, is_h3_image, require_flow_sampling
 from .ltx_av import LTXAVFamily, is_ltx_av, unpack_ltx
 
 _FAMILIES = {"h3_video": H3VideoFamily, "flow_image": FlowImageFamily, "ltx_av": LTXAVFamily}
@@ -49,13 +51,17 @@ def check_model_type(model_type):
 
 
 def resolve_model_type(model_type, guider):
-    """The family to run: ``ltx_av`` for an LTX-2.x model (LTXAV latent format), else ``model_type``.
+    """The family to run: ``ltx_av`` for an LTX-2.x model (LTXAV latent format),
+    ``flow_image`` for MiniMax-H3-Image on the Advanced nodes, else ``model_type``.
 
-    The Advanced nodes (``h3_video``) pick up LTX by themselves; the KSampler
-    nodes (``flow_image``) can't run its nested latent and raise. Runs before
-    the family is built, so an LTX model never reaches the H3 sigma-shift lookup.
+    The Advanced nodes (``h3_video``) pick up LTX and H3-Image by themselves; the
+    KSampler nodes (``flow_image``) can't run LTX's nested latent and raise. Runs
+    before the family is built, so neither model reaches the H3 sigma-shift lookup
+    (H3-Image inherits H3's shift attributes but samples on its own sigma grid).
     """
     model_type = check_model_type(model_type)
+    if model_type == "h3_video" and is_h3_image(guider):
+        return "flow_image"
     if not is_ltx_av(guider):
         if model_type == "ltx_av":
             raise ValueError("ltx_av needs an LTX-2 audio-video model (latent format LTXAV)")
@@ -69,15 +75,22 @@ def resolve_model_type(model_type, guider):
 
 
 def get_family(model_type, guider):
-    """Build the family for a node's ``MODEL_TYPE``; an LTX-2.x model gets ``ltx_av``."""
-    return _FAMILIES[resolve_model_type(model_type, guider)](guider)
+    """Build the family for a node's ``MODEL_TYPE``.
+
+    An LTX-2.x model gets ``ltx_av``; MiniMax-H3-Image on the Advanced nodes gets
+    ``flow_image`` as ``H3ImageFamily``, so its errors name the Advanced nodes.
+    """
+    resolved = resolve_model_type(model_type, guider)
+    if model_type == "h3_video" and resolved == "flow_image":
+        return H3ImageFamily(guider)
+    return _FAMILIES[resolved](guider)
 
 
 @dataclass(frozen=True)
 class PreparedLatent:
     """The family plus the fitted latent dict and its ``main``/``extra`` streams (``extra`` may be ``None``)."""
 
-    family: H3VideoFamily | FlowImageFamily | LTXAVFamily
+    family: H3VideoFamily | FlowImageFamily | H3ImageFamily | LTXAVFamily
     latent: dict
     main: torch.Tensor
     extra: torch.Tensor | None
@@ -105,10 +118,12 @@ __all__ = [
     "MODEL_TYPES",
     "H3VideoFamily",
     "FlowImageFamily",
+    "H3ImageFamily",
     "LTXAVFamily",
     "get_family",
     "resolve_model_type",
     "is_ltx_av",
+    "is_h3_image",
     "unpack_ltx",
     "pack_h3",
     "PreparedLatent",

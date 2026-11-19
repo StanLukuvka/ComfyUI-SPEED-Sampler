@@ -12,13 +12,15 @@ from conftest import (
     Patcher,
     StubSampler,
     flow_patcher,
+    H3Model,
+    h3_image_patcher,
     image_latent,
     ltx_patcher,
     make_latent,
     model_sampling,
 )
 from speed_scripts.config import SpeedConfig
-from speed_scripts.families import FlowImageFamily, get_family
+from speed_scripts.families import FlowImageFamily, H3ImageFamily, H3VideoFamily, get_family
 from speed_scripts.runtime import run_speed_pipeline
 
 
@@ -87,3 +89,42 @@ def test_family_errors_name_the_node_to_use(model_type, guider, latent, error):
 def test_image_family_accepts_flow_sampling(first_base):
     guider = _image_guider(model_sampling(first_base, "CONST"))
     assert isinstance(get_family("flow_image", guider), FlowImageFamily)
+
+
+
+def _h3_image_guider(clean):
+    guider = OracleFlowGuider(clean, latent_dimensions=3)
+    guider.model_patcher = h3_image_patcher()
+    return guider
+
+
+def test_advanced_nodes_detect_h3_image():
+    family = get_family("h3_video", _h3_image_guider(torch.zeros(1)))
+    assert isinstance(family, H3ImageFamily) and family.name == "flow_image"
+    # The KSampler nodes run it as a plain flow image model.
+    assert type(get_family("flow_image", _h3_image_guider(torch.zeros(1)))) is FlowImageFamily
+
+
+def test_h3_video_latent_format_is_not_h3_image():
+    # The H3 video+audio model uses MiniMaxH3AV and keeps the H3 family.
+    patcher = Patcher(H3Model(), model_sampling=model_sampling(),
+                      latent_format=type("MiniMaxH3AV", (), {"latent_dimensions": 3})())
+    assert isinstance(get_family("h3_video", _guider(patcher)), H3VideoFamily)
+
+
+def test_h3_image_errors_name_the_advanced_nodes():
+    cfg = SpeedConfig(scales=(.5, 1.0), transition_steps=(5,), transition_mode="explicit")
+    with pytest.raises(ValueError, match=r"^SPEED Advanced nodes on MiniMax-H3-Image got a nested video/audio latent; "
+                                         r"connect the latent from MiniMaxH3ImageConditioning$"):
+        run_speed_pipeline(EchoNoise(), _h3_image_guider(torch.zeros(1)), SIGMAS, make_latent(), cfg,
+                           sampler=StubSampler(), model_type="h3_video")
+
+
+def test_advanced_nodes_run_h3_image_latent():
+    shape = (1, 24, 1, 8, 12)
+    guider = _h3_image_guider(torch.randn(shape))
+    cfg = SpeedConfig(scales=(.5, 1.0), transition_steps=(5,), transition_mode="explicit")
+    out, _ = run_speed_pipeline(EchoNoise(), guider, SIGMAS, {"samples": torch.zeros(shape)}, cfg,
+                                sampler=StubSampler(), model_type="h3_video")
+    assert out["samples"].shape == shape
+    assert [tuple(s.shape) for s in guider.starts] == [(1, 24, 1, 4, 6), shape]

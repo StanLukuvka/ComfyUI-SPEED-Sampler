@@ -29,7 +29,7 @@ class SPEEDSampler:
     )
     FUNCTION = "sample"
     CATEGORY = "sampling/speed"
-    # The node decides the model family: the Advanced nodes run MiniMax-H3 (LTX-2.x is detected).
+    # The node decides the model family: the Advanced nodes run MiniMax-H3 (LTX-2.x and H3-Image are detected).
     MODEL_TYPE = "h3_video"
 
     @classmethod
