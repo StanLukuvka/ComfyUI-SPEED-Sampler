@@ -27,7 +27,7 @@ class SPEEDSigmaHarvest:
         "Latent from the native full-resolution pass, for inspection only. Not a SPEED result.",
     )
     FUNCTION = "harvest"
-    # The node decides the model family: the Advanced nodes run MiniMax-H3.
+    # The node decides the model family: the Advanced nodes run MiniMax-H3 (LTX-2.x is detected).
     MODEL_TYPE = "h3_video"
     CATEGORY = "sampling/speed/diagnostics"
     OUTPUT_NODE = False

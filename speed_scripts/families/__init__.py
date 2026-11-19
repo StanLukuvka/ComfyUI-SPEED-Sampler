@@ -1,5 +1,8 @@
 """Model families SPEED can run; each node class fixes its family with ``MODEL_TYPE``.
 
+The one exception is LTX-2.x: the Advanced nodes (``h3_video``) detect its LTXAV
+latent format and run ``ltx_av`` instead (``resolve_model_type``).
+
 A family splits its latent into the spatial stream SPEED resizes (always
 ``[B, C, T, H, W]`` here) and an optional extra stream, reads a stage's output
 back into sampler state, and carries the extra stream across a resolution
@@ -14,8 +17,9 @@ import torch
 
 from .h3_video import H3VideoFamily, pack_h3, resolve_sigma_shifts, unpack_h3
 from .flow_image import FlowImageFamily, require_flow_sampling
+from .ltx_av import LTXAVFamily, is_ltx_av, unpack_ltx
 
-_FAMILIES = {"h3_video": H3VideoFamily, "flow_image": FlowImageFamily}
+_FAMILIES = {"h3_video": H3VideoFamily, "flow_image": FlowImageFamily, "ltx_av": LTXAVFamily}
 MODEL_TYPES = tuple(_FAMILIES)
 
 
@@ -23,7 +27,7 @@ def prepare_latent(guider, latent):
     """Copy of ``latent`` with the empty latent fitted to the model, as SamplerCustomAdvanced does.
 
     Generic empty-latent nodes (e.g. EmptyLatentImage) give 4 channels; ComfyUI widens
-    them to the model's latent format. Nested (h3_video) latents pass through unchanged.
+    them to the model's latent format. Nested (h3_video, ltx_av) latents pass through unchanged.
     """
     import comfy.sample
 
@@ -44,29 +48,50 @@ def check_model_type(model_type):
     return model_type
 
 
+def resolve_model_type(model_type, guider):
+    """The family to run: ``ltx_av`` for an LTX-2.x model (LTXAV latent format), else ``model_type``.
+
+    The Advanced nodes (``h3_video``) pick up LTX by themselves; the KSampler
+    nodes (``flow_image``) can't run its nested latent and raise. Runs before
+    the family is built, so an LTX model never reaches the H3 sigma-shift lookup.
+    """
+    model_type = check_model_type(model_type)
+    if not is_ltx_av(guider):
+        if model_type == "ltx_av":
+            raise ValueError("ltx_av needs an LTX-2 audio-video model (latent format LTXAV)")
+        return model_type
+    if model_type == "flow_image":
+        raise ValueError(
+            "SPEED KSampler nodes got an LTX-2 audio-video model (latent format LTXAV); "
+            "use the SPEED Advanced nodes (SPEED Sampler, Manual, Sigma Harvest)"
+        )
+    return "ltx_av"
+
+
 def get_family(model_type, guider):
-    """Build the family for a node's ``MODEL_TYPE``."""
-    return _FAMILIES[check_model_type(model_type)](guider)
+    """Build the family for a node's ``MODEL_TYPE``; an LTX-2.x model gets ``ltx_av``."""
+    return _FAMILIES[resolve_model_type(model_type, guider)](guider)
 
 
 @dataclass(frozen=True)
 class PreparedLatent:
     """The family plus the fitted latent dict and its ``main``/``extra`` streams (``extra`` may be ``None``)."""
 
-    family: H3VideoFamily | FlowImageFamily
+    family: H3VideoFamily | FlowImageFamily | LTXAVFamily
     latent: dict
     main: torch.Tensor
     extra: torch.Tensor | None
 
 
 def prepare_family(model_type, guider, latent) -> PreparedLatent:
-    """Pick the family, fit the latent and split it, checking it is unmasked.
+    """Pick the family, fit the latent and split it.
 
-    Only a family with ``accepts_source_latent`` takes a non-empty latent (image-to-image).
+    Only a family with ``accepts_source_latent`` takes a non-empty latent (image-to-image),
+    and only one with ``accepts_noise_mask`` takes a ``noise_mask`` (LTX image-to-video).
     """
-    if "noise_mask" in latent:
-        raise ValueError("SPEED does not support noise masks")
     family = get_family(model_type, guider)
+    if "noise_mask" in latent and not family.accepts_noise_mask:
+        raise ValueError("SPEED does not support noise masks")
     latent = prepare_latent(guider, latent)
 
     main, extra = family.split(latent.get("samples"))
@@ -80,7 +105,11 @@ __all__ = [
     "MODEL_TYPES",
     "H3VideoFamily",
     "FlowImageFamily",
+    "LTXAVFamily",
     "get_family",
+    "resolve_model_type",
+    "is_ltx_av",
+    "unpack_ltx",
     "pack_h3",
     "PreparedLatent",
     "prepare_family",

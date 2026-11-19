@@ -22,7 +22,7 @@ def _sampling_name(sampling):
     return " / ".join(bases) or type(sampling).__name__
 
 
-def require_flow_sampling(guider):
+def require_flow_sampling(guider, who="SPEED KSampler nodes"):
     """Raise unless the guider's model samples as a flow (CONST) model.
 
     Image-to-image flow variants are rejected too: they condition on a source image.
@@ -35,7 +35,7 @@ def require_flow_sampling(guider):
         (comfy.model_sampling.IMG_TO_IMG_FLOW, comfy.model_sampling.IMG_TO_IMG_VELOCITY),
     ):
         raise ValueError(
-            "SPEED KSampler nodes support flow (CONST) models only; "
+            f"{who} support flow (CONST) models only; "
             f"this model uses {_sampling_name(sampling)}"
         )
 
@@ -52,6 +52,7 @@ class FlowImageFamily:
     nodes = "SPEED KSampler nodes"
     # Image-to-image: a VAE-encoded latent seeds the first stage, as SamplerCustomAdvanced does.
     accepts_source_latent = True
+    accepts_noise_mask = False
     # Edit models: reference_latents share the image's position grid, so they scale with each stage.
     scales_reference_latents = True
 

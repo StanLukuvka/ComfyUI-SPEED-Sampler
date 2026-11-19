@@ -114,6 +114,8 @@ def _downsample_source(full_main, target_thw):
     if target_t != full_main.shape[-3]:
         raise ValueError("SPEED image-to-image does not support temporal stage scales")
     source_h, source_w = full_main.shape[-2:]
+    if (target_h, target_w) == (source_h, source_w):
+        return full_main
     gain = ((target_h * target_w) / (source_h * source_w)) ** 0.5
     return lowpass_dct(full_main, (target_h, target_w)) * gain
 
@@ -218,7 +220,11 @@ def run_stages(
     working_sigmas = sigmas.clone()
     stage_h, stage_w, stage_t = stage_shapes[0]
     coarse_main = _downsample_source(full_main, (stage_t, stage_h, stage_w))
-    stage_start_latent = family.join(coarse_main, _maybe(torch.zeros_like, full_extra))
+    # A noise_mask (LTX image-to-video) pins the masked frames to the source at every step, so
+    # every stage gets the mask and the source at its own size; ComfyUI resizes the mask.
+    noise_mask = latent.get("noise_mask")
+    source_extra = full_extra if noise_mask is not None else _maybe(torch.zeros_like, full_extra)
+    stage_start_latent = family.join(coarse_main, source_extra)
 
     full_noise_coefficients = None
     if config.noise_policy == "coupled_full_grid":
@@ -265,6 +271,7 @@ def run_stages(
                 stage_start_latent,
                 sampler,
                 stage_sigmas,
+                denoise_mask=noise_mask,
                 callback=callback,
                 disable_pbar=disable_pbar,
                 seed=noise.seed,
@@ -298,14 +305,26 @@ def run_stages(
                 x0_output.get("x0"),
             )
 
-            stage_start_pub = family.join(
-                reentry_noise(transitioned_main, next_sigma),
-                _maybe(lambda state: reentry_noise(state, next_sigma), transitioned_extra),
-            )
-            stage_start_latent = family.join(
-                torch.zeros_like(transitioned_main),
-                _maybe(torch.zeros_like, transitioned_extra),
-            )
+            if noise_mask is None:
+                stage_start_pub = family.join(
+                    reentry_noise(transitioned_main, next_sigma),
+                    _maybe(lambda state: reentry_noise(state, next_sigma), transitioned_extra),
+                )
+                stage_start_latent = family.join(
+                    torch.zeros_like(transitioned_main),
+                    _maybe(torch.zeros_like, transitioned_extra),
+                )
+            else:
+                # The sampler starts from sigma * noise + (1 - sigma) * source; remove the
+                # source term so the stage starts exactly on the carried state.
+                source_main = _downsample_source(full_main, (next_t, next_h, next_w))
+                stage_start_pub = family.join(
+                    reentry_noise(transitioned_main - (1.0 - next_sigma) * source_main.to(transitioned_main),
+                                  next_sigma),
+                    _maybe(lambda state: reentry_noise(state - (1.0 - next_sigma) * full_extra.to(state), next_sigma),
+                           transitioned_extra),
+                )
+                stage_start_latent = family.join(source_main, full_extra)
             global_start = global_end
 
         walker.apply_final()
@@ -321,6 +340,7 @@ def run_stages(
             stage_start_latent,
             sampler,
             final_sigmas,
+            denoise_mask=noise_mask,
             callback=final_callback,
             disable_pbar=disable_pbar,
             seed=noise.seed,

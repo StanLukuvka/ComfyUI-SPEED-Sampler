@@ -211,6 +211,19 @@ def flow_patcher(sampling=None, latent_dimensions=2):
     )
 
 
+class LTXModel:
+    """LTX-2.x model stand-in: no H3 sigma shifts, identity latent format."""
+
+    def process_latent_out(self, x):
+        return x
+
+
+def ltx_patcher():
+    """Patcher for an LTX-2.x audio-video model: flow (CONST) sampling, the LTXAV latent format."""
+    latent_format = type("LTXAV", (), {"latent_dimensions": 3, "spacial_downscale_ratio": 32})()
+    return Patcher(LTXModel(), model_sampling=model_sampling(), latent_format=latent_format)
+
+
 class OracleFlowGuider:
     """Mimics ComfyUI's CFGGuider.sample for a CONST flow model with an ideal denoiser.
 
