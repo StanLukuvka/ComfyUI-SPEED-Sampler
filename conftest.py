@@ -224,6 +224,22 @@ def ltx_patcher():
     return Patcher(LTXModel(), model_sampling=model_sampling(), latent_format=latent_format)
 
 
+class H3ImageModel:
+    """MiniMax-H3-Image model stand-in: its MiniMaxH3Video latent format is the identity."""
+
+    def process_latent_in(self, x):
+        return x
+
+    def process_latent_out(self, x):
+        return x
+
+
+def h3_image_patcher():
+    """Patcher for MiniMax-H3-Image: flow (CONST) sampling, the 3-D MiniMaxH3Video latent format."""
+    latent_format = type("MiniMaxH3Video", (), {"latent_dimensions": 3})()
+    return Patcher(H3ImageModel(), model_sampling=model_sampling(), latent_format=latent_format)
+
+
 class OracleFlowGuider:
     """Mimics ComfyUI's CFGGuider.sample for a CONST flow model with an ideal denoiser.
 

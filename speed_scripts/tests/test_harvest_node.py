@@ -6,7 +6,7 @@ import json
 import pytest
 import torch
 
-from conftest import EchoNoise, H3Model, NestedTensor, Patcher, StubSampler, model_sampling
+from conftest import EchoNoise, H3Model, NestedTensor, Patcher, StubSampler, h3_image_patcher, model_sampling
 
 harvest_module = importlib.import_module("sampler_sigma_harvest_node")
 ksampler_harvest_module = importlib.import_module("ksampler_sigma_harvest_node")
@@ -281,3 +281,27 @@ def test_harvest_on_ltx_with_a_plain_latent_points_at_the_nested_latent():
     result = json.loads(_harvest_unset(_ltx_guider(), _image_latent())[0])
     assert result["error"] == "no_captures"
     assert "connect the nested video/audio latent from LTXVConcatAVLatent" in result["message"]
+
+
+def _h3_image_guider():
+    """HarvestGuider on MiniMax-H3-Image: the MiniMaxH3Video latent format, a flow (CONST) sampling."""
+    guider = HarvestGuider()
+    guider.model_patcher = h3_image_patcher()
+    return guider
+
+
+def _h3_image_latent():
+    return {"samples": _red_noise(1, 4, 1, 16, 16)}
+
+
+def test_harvest_detects_and_calibrates_an_h3_image_model():
+    calibration = json.loads(_harvest_unset(_h3_image_guider(), _h3_image_latent())[0])
+    assert calibration["model_type"] == "flow_image"
+    assert 0 < calibration["noise_amplitude"] < 1e6
+
+
+def test_harvest_on_h3_image_with_a_nested_latent_points_at_its_conditioning_node():
+    result = json.loads(_harvest_unset(_h3_image_guider(), _h3_latent())[0])
+    assert result["error"] == "no_captures"
+    assert "SPEED Advanced nodes on MiniMax-H3-Image" in result["message"]
+    assert "connect the latent from MiniMaxH3ImageConditioning" in result["message"]

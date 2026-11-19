@@ -24,7 +24,7 @@ Rules for working on this pack. Usage, reference A/beta values and per-sampler r
 
 ## Rules
 
-- Add a model by adding a family, not by branching in the runtime. The family comes from the node class; the one exception is LTX-2.x, which the Advanced nodes detect by its `LTXAV` latent format.
+- Add a model by adding a family, not by branching in the runtime. The family comes from the node class; the exceptions are detected by latent format on the Advanced nodes: LTX-2.x (`LTXAV`) runs `ltx_av`, and MiniMax-H3-Image (`MiniMaxH3Video`, a plain `[1,24,1,H,W]` latent) runs `flow_image` as `H3ImageFamily`, whose errors name the Advanced nodes.
 - No random configuration and no silent randomization in config paths.
 - Euler is the calibration and benchmark reference. Do not claim parity or recommend a sampler without a measured run. Known-bad samplers go in the README.
 
