@@ -117,8 +117,9 @@ def run_harvest(
     Returns:
         tuple[str, dict]: (output_json, output_latent)
     """
-    # get_family validates model_type and runs the family's own checks.
+    # get_family validates model_type, detects LTX-2.x and runs the family's own checks.
     family = get_family(model_type, guider)
+    model_type = family.name
 
     callback_count = 0
     capture_count = 0
@@ -192,11 +193,11 @@ def run_harvest(
         if first_residual_error is not None:
             message = f"Residual capture failed: {first_residual_error}"
         elif callback_count:
-            hint = (
-                "use SPEED KSampler nodes for image models"
-                if model_type == "h3_video"
-                else "use SPEED Advanced nodes for MiniMax-H3 video latents"
-            )
+            hint = {
+                "h3_video": "use SPEED KSampler nodes for image models",
+                "flow_image": "use SPEED Advanced nodes for MiniMax-H3 video latents",
+                "ltx_av": "connect the nested video/audio latent from LTXVConcatAVLatent",
+            }[model_type]
             message = (
                 f"No per-step residual snapshots recorded. The sampler callback fired "
                 f"{callback_count} times, but its latent does not fit "

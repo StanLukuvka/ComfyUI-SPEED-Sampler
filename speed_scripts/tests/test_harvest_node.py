@@ -254,3 +254,30 @@ def test_ksampler_harvest_passes_the_built_inputs_into_run_harvest(monkeypatch):
     assert built == [(model, 7, 20, 8.0, "euler", "normal", positive, negative, 1.0)]
     assert recorded == [(noise, guider, sampler, sigmas, latent, "flow_image", 0.012)]
     assert result == ("calibration-json", latent)
+
+
+def _ltx_guider():
+    """HarvestGuider on an LTX-2 model: the LTXAV latent format, a flow (CONST) sampling."""
+    guider = HarvestGuider()
+    guider.model_patcher.objects["latent_format"] = type("LTXAV", (), {"latent_dimensions": 3})()
+    return guider
+
+
+def _harvest_unset(guider, latent):
+    """Harvest through the Advanced node as a user wires it: no family setting."""
+    return harvest_module.SPEEDSigmaHarvest().harvest(
+        noise=EchoNoise(), guider=guider, sampler=StubSampler(), sigmas=torch.linspace(1.0, .025, 20),
+        latent_image=latent,
+    )
+
+
+def test_harvest_detects_and_calibrates_an_ltx_model():
+    calibration = json.loads(_harvest_unset(_ltx_guider(), _h3_latent())[0])
+    assert calibration["model_type"] == "ltx_av"
+    assert 0 < calibration["noise_amplitude"] < 1e6
+
+
+def test_harvest_on_ltx_with_a_plain_latent_points_at_the_nested_latent():
+    result = json.loads(_harvest_unset(_ltx_guider(), _image_latent())[0])
+    assert result["error"] == "no_captures"
+    assert "connect the nested video/audio latent from LTXVConcatAVLatent" in result["message"]

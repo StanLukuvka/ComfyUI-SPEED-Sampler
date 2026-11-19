@@ -7,6 +7,6 @@ Package layout:
 - spectral.py — DCT primitives and spectral expansion
 - latent_class.py — generation-local I2V keyframe lifecycle
 - runtime.py — multi-stage SPEED execution
-- families/ — per-model latent handling (registry, h3_video, flow_image)
+- families/ — per-model latent handling (registry, h3_video, flow_image, ltx_av)
 - harvest.py — native-sampler calibration math
 """

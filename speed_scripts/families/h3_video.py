@@ -148,6 +148,7 @@ class H3VideoFamily:
     name = "h3_video"
     nodes = "SPEED Advanced nodes"
     accepts_source_latent = False
+    accepts_noise_mask = False
     scales_reference_latents = False
 
     def __init__(self, guider):

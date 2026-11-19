@@ -1,4 +1,4 @@
-"""Automatic SPEED sampler (SamplerCustomAdvanced style) for MiniMax-H3."""
+"""Automatic SPEED sampler (SamplerCustomAdvanced style) for MiniMax-H3 and LTX-2.x."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ class SPEEDSampler:
     )
     FUNCTION = "sample"
     CATEGORY = "sampling/speed"
-    # The node decides the model family: the Advanced nodes run MiniMax-H3.
+    # The node decides the model family: the Advanced nodes run MiniMax-H3 (LTX-2.x is detected).
     MODEL_TYPE = "h3_video"
 
     @classmethod
