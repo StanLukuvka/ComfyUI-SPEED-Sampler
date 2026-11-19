@@ -2,7 +2,16 @@
 
 All notable changes to this project are documented here. New releases should be added above older ones.
 
-## [2.0.0] - Unreleased
+## [2.1.0] - 2026-11-19
+
+A minor release: two more models on the Advanced nodes, detected from the model with no new input. Saved workflows load unchanged.
+
+### Added
+
+- Added the `ltx_av` family for LTX-2.x audio-video models (`families/ltx_av.py`, `LTXAVFamily`). `SPEEDSampler`, `SPEEDSamplerManual` and `SPEEDSigmaHarvest` detect an LTX model by its `LTXAV` latent format and run it with no new input; the KSampler nodes point an LTX model to them. SPEED resizes the nested latent's video stream and carries the audio unchanged, since LTX gives the audio the video's timestep. LTX image-to-video and guides work: the family accepts their `noise_mask` (`accepts_noise_mask`), and every stage gets the mask and the source latent low-passed to its size. H3 and image models still reject noise masks. Tested on one LTX-2.5 t2v case (1280×704, 121 frames, euler, 3 stages) on an 8 GB laptop GPU: 92 s against 138 s stock, a clean clip with the same shot. No quality floor yet.
+- Added MiniMax-H3-Image (stills) on the Advanced nodes. `SPEEDSampler`, `SPEEDSamplerManual` and `SPEEDSigmaHarvest` detect the H3-Image model by its `MiniMaxH3Video` latent format (`families.is_h3_image`) and run its plain `[1,24,1,H,W]` latent as `flow_image`, so a `MiniMaxH3ImageConditioning` → SamplerCustomAdvanced graph keeps its own guider and sampler (SamplerLCM's `s_noise` schedule included). Their errors name the Advanced nodes (`H3ImageFamily`). Reference pictures (`minimax_refs`) stay full size at every stage. The H3 video+audio model (`MiniMaxH3AV`) is unchanged, and the KSampler nodes already ran H3-Image as a flow image model (untested on hardware). Tested on one case (2720×1536, reference pictures, SamplerLCM, simple, 6 steps, RTX 5070 Laptop): stock 34.7 s, 2-stage Automatic 31.1 s at Δ 0.05 (Harvest A 39.79, β 0.853), with no visible artefacts. 3 stages fail on this schedule: both boundaries land on step 2, and LCM can't take the empty middle stage.
+
+## [2.0.0] - 2026-11-03
 
 ### Highlights
 
@@ -19,8 +28,6 @@ V2 updates the SPEED nodes and reworks several parts of the implementation.
 
 ### Added
 
-- Added MiniMax-H3-Image (stills) on the Advanced nodes. `SPEEDSampler`, `SPEEDSamplerManual` and `SPEEDSigmaHarvest` detect the H3-Image model by its `MiniMaxH3Video` latent format (`families.is_h3_image`) and run its plain `[1,24,1,H,W]` latent as `flow_image`, so a `MiniMaxH3ImageConditioning` → SamplerCustomAdvanced graph keeps its own guider and sampler (SamplerLCM's `s_noise` schedule included). Their errors name the Advanced nodes (`H3ImageFamily`). Reference pictures (`minimax_refs`) stay full size at every stage. The H3 video+audio model (`MiniMaxH3AV`) is unchanged, and the KSampler nodes already ran H3-Image as a flow image model (untested on hardware). Tested on one case (2720×1536, reference pictures, SamplerLCM, simple, 6 steps, RTX 5070 Laptop): stock 34.7 s, 2-stage Automatic 31.1 s at Δ 0.05 (Harvest A 39.79, β 0.853), with no visible artefacts. 3 stages fail on this schedule: both boundaries land on step 2, and LCM can't take the empty middle stage.
-- Added the `ltx_av` family for LTX-2.x audio-video models (`families/ltx_av.py`, `LTXAVFamily`). `SPEEDSampler`, `SPEEDSamplerManual` and `SPEEDSigmaHarvest` detect an LTX model by its `LTXAV` latent format and run it with no new input; the KSampler nodes point an LTX model to them. SPEED resizes the nested latent's video stream and carries the audio unchanged, since LTX gives the audio the video's timestep. LTX image-to-video and guides work: the family accepts their `noise_mask` (`accepts_noise_mask`), and every stage gets the mask and the source latent low-passed to its size. H3 and image models still reject noise masks. Tested on one LTX-2.5 t2v case (1280×704, 121 frames, euler, 3 stages) on an 8 GB laptop GPU: 92 s against 138 s stock, a clean clip with the same shot. No quality floor yet.
 - Added three KSampler-style nodes: `SPEEDKSampler` (`SPEED — KSampler`), `SPEEDKSamplerManual` (`SPEED — KSampler (Manual)`) and `SPEEDKSamplerHarvest` (`SPEED — KSampler Sigma Harvest`). They take `model`, conditioning and a `latent_image` like ComfyUI's KSampler and build the noise, CFG guider, sampler and sigma schedule internally (`speed_scripts/ksampler_inputs.build_ksampler_inputs`), with KSampler's penultimate-sigma discard and denoise slicing, then run the same SPEED pipeline as the Advanced nodes. `SPEEDKSampler` and `SPEEDKSamplerManual` return the latent unchanged when `denoise` leaves fewer than two sigmas, as KSampler does. `SPEEDKSamplerHarvest` has no `denoise` widget: it always calibrates on the full schedule (`denoise` 1.0).
 - Added `run_harvest` in `speed_scripts/harvest.py`, the Harvest execution core extracted from the node; `SPEEDSigmaHarvest` and `SPEEDKSamplerHarvest` are both thin wrappers over it. No behaviour change.
 - Added image-to-image for flow image models: a VAE-encoded `latent_image` with BasicScheduler's `denoise` below 1 (KSampler's `denoise`) seeds the first stage with the image shrunk to that stage's size. Automatic skips coarse stages whose boundary the shortened schedule has already passed. MiniMax-H3 still requires an empty latent. `StagePlan` gained a `scales` field for the stages that run.
@@ -76,7 +83,7 @@ V2 updates the SPEED nodes and reworks several parts of the implementation.
 
 ### Removed
 
-- Removed the `model_type` widget. The Advanced nodes (and the deprecated `MiniMaxH3*` IDs) run MiniMax-H3 (or LTX-2.x, detected by its latent format); the KSampler nodes run flow image models only. **Breaking for saved workflows:** workflows saved with the widget load with every later widget value shifted by one; re-enter the SPEED widgets or load the updated example workflows.
+- Removed the `model_type` widget. The Advanced nodes (and the deprecated `MiniMaxH3*` IDs) run MiniMax-H3 only; the KSampler nodes run flow image models only. **Breaking for saved workflows:** workflows saved with the widget load with every later widget value shifted by one; re-enter the SPEED widgets or load the updated example workflows.
 - Removed legacy planner/walker shims, alternate Tolerance aliases, and Harvest compatibility paths.
 - Removed V1 Automatic preset names; Automatic now uses only the explicit `stages` selector.
 - Removed the old `nodes_common.py` helper layer.
