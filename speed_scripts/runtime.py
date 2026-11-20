@@ -13,6 +13,7 @@ import torch
 
 from .config import SpeedConfig
 from .families import PreparedLatent, prepare_family
+from .hooks import noise_policy_start, register_noise_policy, start_observers
 from .flow import aligned_sigma, reentry_noise
 from .latent_class import LatentWalker
 from .planning import StagePlan, plan_stages
@@ -87,17 +88,18 @@ def _coupled_transition(
     target_thw,
     sigma: float,
 ):
-    """Grow the stage from the shared full-resolution noise field."""
+    """Move the stage to ``target_thw`` on the shared noise field: shrinking drops the top bands."""
     target_t, target_h, target_w = target_thw
     source_t, source_h, source_w = internal_main.shape[-3:]
+    shared_t, shared_h, shared_w = min(source_t, target_t), min(source_h, target_h), min(source_w, target_w)
     full_noise_coefficients = full_noise_coefficients.to(device=internal_main.device)
     target_coefficients = (
         full_noise_coefficients[..., :target_t, :target_h, :target_w].clone()
         * float(sigma)
     )
-    target_coefficients[..., :source_t, :source_h, :source_w] = dct2(
-        dct_temporal(internal_main)
-    )
+    target_coefficients[..., :shared_t, :shared_h, :shared_w] = dct2(dct_temporal(internal_main))[
+        ..., :shared_t, :shared_h, :shared_w
+    ]
     return idct_temporal(idct2(target_coefficients)).to(dtype=internal_main.dtype)
 
 
@@ -120,6 +122,39 @@ def _downsample_source(full_main, target_thw):
     return lowpass_dct(full_main, (target_h, target_w)) * gain
 
 
+def _check_source_fits(full_main, plan):
+    """Raise before sampling when a source image (image-to-image, LTX image-to-video) would need a
+    stage larger than the latent: the source can only be low-passed down. SPEED's own plans never
+    do this; a plan from ``run_speed_pipeline(plan_fn=...)`` can."""
+    if not torch.count_nonzero(full_main):
+        return
+    source_h, source_w = full_main.shape[-2:]
+    if any(h > source_h or w > source_w for h, w, _ in plan.stage_shapes):
+        raise ValueError(
+            "a source image (image-to-image or LTX image-to-video) only works when every stage fits the "
+            f"latent ({source_h}x{source_w} cells); this plan has a larger stage"
+        )
+
+
+def _start_direct_coarse(noise, prepared, plan, stage_start_latent):
+    coarse_latent = prepared.latent.copy()
+    coarse_latent["samples"] = stage_start_latent
+    return noise.generate_noise(coarse_latent), None
+
+
+def _start_coupled_full_grid(noise, prepared, plan, stage_start_latent):
+    family = prepared.family
+    stage_h, stage_w, stage_t = plan.stage_shapes[0]
+    full_noise_main, full_noise_extra = family.split(noise.generate_noise(prepared.latent))
+    coarse_noise_main = lowpass_dct(full_noise_main[..., :stage_t, :, :], (stage_h, stage_w))
+    full_noise_coefficients = dct2(dct_temporal(full_noise_main))
+    return family.join(coarse_noise_main, full_noise_extra), full_noise_coefficients
+
+
+register_noise_policy("direct_coarse", _start_direct_coarse)
+register_noise_policy("coupled_full_grid", _start_coupled_full_grid)
+
+
 def _expand_main(
     internal_main,
     *,
@@ -128,7 +163,7 @@ def _expand_main(
     seed: int,
     full_noise_coefficients=None,
 ):
-    """Grow the carried spatial state to the next stage size."""
+    """Move the carried spatial state to the next stage size (larger, or smaller under a custom plan)."""
     target_t, target_h, target_w = target_thw
     if full_noise_coefficients is not None:
         return _coupled_transition(
@@ -137,6 +172,9 @@ def _expand_main(
             target_thw,
             sigma,
         )
+    source_h, source_w = internal_main.shape[-2:]
+    if target_h < source_h or target_w < source_w:   # a smaller stage keeps the low bands
+        internal_main = lowpass_dct(internal_main, (min(source_h, target_h), min(source_w, target_w)))
     if target_t > internal_main.shape[-3]:
         return spectral_expand_3d(
             internal_main,
@@ -165,14 +203,20 @@ def run_speed_pipeline(
     output_device=None,
     preview_callback=None,
     x0_output=None,
+    plan_fn=None,
 ):
     """Run ``prepare_family``, ``plan_stages``, then ``run_stages``.
 
-    ``sampler`` is any ComfyUI SAMPLER. ``model_type`` picks the family.
+    ``sampler`` is any ComfyUI SAMPLER. ``model_type`` picks the family. ``plan_fn(config, sigmas,
+    prepared)`` replaces ``plan_stages`` and returns a ``StagePlan``; its stages may be larger or
+    smaller than the latent, and the run ends at the latent's size.
     """
     prepared = prepare_family(model_type, guider, latent)
-    plan = plan_stages(config, sigmas, prepared.main.shape)
-    if len(plan.scales) < len(config.scales):
+    if plan_fn is not None:
+        plan = plan_fn(config, sigmas, prepared)
+    else:
+        plan = plan_stages(config, sigmas, prepared.main.shape)
+    if plan_fn is None and len(plan.scales) < len(config.scales):
         log.info(
             "[SPEED] sigma schedule starts at %.4f, below the first %d stage threshold(s): running %d stage(s)",
             float(sigmas[0]),
@@ -217,6 +261,7 @@ def run_stages(
     stage_shapes = plan.stage_shapes
     transition_steps = plan.transition_steps
 
+    _check_source_fits(full_main, plan)
     working_sigmas = sigmas.clone()
     stage_h, stage_w, stage_t = stage_shapes[0]
     coarse_main = _downsample_source(full_main, (stage_t, stage_h, stage_w))
@@ -226,20 +271,8 @@ def run_stages(
     source_extra = full_extra if noise_mask is not None else _maybe(torch.zeros_like, full_extra)
     stage_start_latent = family.join(coarse_main, source_extra)
 
-    full_noise_coefficients = None
-    if config.noise_policy == "coupled_full_grid":
-        full_noise_main, full_noise_extra = family.split(noise.generate_noise(latent))
-        coarse_noise_main = lowpass_dct(
-            full_noise_main[..., :stage_t, :, :],
-            (stage_h, stage_w),
-        )
-        full_noise_coefficients = dct2(dct_temporal(full_noise_main))
-        stage_start_pub = family.join(coarse_noise_main, full_noise_extra)
-        del full_noise_main
-    else:
-        coarse_latent = latent.copy()
-        coarse_latent["samples"] = stage_start_latent
-        stage_start_pub = noise.generate_noise(coarse_latent)
+    start_noise = noise_policy_start(config.noise_policy)
+    stage_start_pub, full_noise_coefficients = start_noise(noise, prepared, plan, stage_start_latent)
 
     if x0_output is None:
         x0_output = {}
@@ -248,6 +281,18 @@ def run_stages(
     if stock_callback is None:
         stock_callback = _build_preview_callback(guider, global_total, x0_output)
     preview_guard = _PreviewGuard()
+    observers = start_observers(
+        family=family,
+        sampler_path="speed",
+        seed=int(noise.seed),
+        sigmas=[float(s) for s in sigmas],
+        noise_policy=config.noise_policy,
+        sigma_policy=config.sigma_policy,
+        scales=list(scales),
+        stage_shapes=[list(shape) for shape in stage_shapes],
+        transition_steps=list(transition_steps),
+        full_shape=list(full_main.shape),
+    )
 
     reference_hw = tuple(full_main.shape[-2:]) if family.scales_reference_latents else None
     walker = LatentWalker(guider, reference_hw)
@@ -265,6 +310,9 @@ def run_stages(
                 x0_output,
                 global_done,
                 global_total,
+            )
+            callback = observers.wrap(
+                callback, stage=stage_idx, stage_sigmas=stage_sigmas, global_offset=global_done, nominal_sigmas=sigmas
             )
             public = guider.sample(
                 stage_start_pub,
@@ -335,6 +383,13 @@ def run_stages(
             global_done,
             global_total,
         )
+        final_callback = observers.wrap(
+            final_callback,
+            stage=len(transition_steps),
+            stage_sigmas=final_sigmas,
+            global_offset=global_done,
+            nominal_sigmas=sigmas,
+        )
         last_public = guider.sample(
             stage_start_pub,
             stage_start_latent,
@@ -345,6 +400,7 @@ def run_stages(
             disable_pbar=disable_pbar,
             seed=noise.seed,
         )
+        observers.finish(last_public)
 
         if output_device is not None:
             last_public = last_public.to(output_device)

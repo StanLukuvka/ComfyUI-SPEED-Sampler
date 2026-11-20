@@ -150,6 +150,7 @@ class H3VideoFamily:
     accepts_source_latent = False
     accepts_noise_mask = False
     scales_reference_latents = False
+    spatial_factor = 16   # pixels per latent cell
 
     def __init__(self, guider):
         self.video_shift, self.audio_shift, self.audio_scale = resolve_sigma_shifts(guider)

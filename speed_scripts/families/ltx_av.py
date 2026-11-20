@@ -47,6 +47,7 @@ class LTXAVFamily:
     accepts_source_latent = True
     accepts_noise_mask = True
     scales_reference_latents = False
+    spatial_factor = 32   # pixels per latent cell
 
     def __init__(self, guider):
         require_flow_sampling(guider, "SPEED Advanced nodes on LTX-2")

@@ -15,6 +15,7 @@ import numpy as np
 import torch
 
 from .families import get_family, prepare_latent
+from .hooks import start_observers
 from .planning import activation_threshold, find_first_step_below, power_at_frequency
 from .spectral import dct2
 
@@ -167,6 +168,16 @@ def run_harvest(
     latent_image = prepare_latent(guider, latent_image)
     latent_tensor = latent_image["samples"]
     noise_tensor = noise.generate_noise(latent_image)
+    observers = start_observers(
+        family=family,
+        sampler_path="native",
+        seed=int(getattr(noise, "seed", 42)),
+        sigmas=[float(s) for s in sigmas],
+        sampler_name=sampler_name,
+    )
+    sample_callback = observers.wrap(
+        _capture_callback, stage=0, stage_sigmas=sigmas, global_offset=0, nominal_sigmas=sigmas
+    )
 
     try:
         result = guider.sample(
@@ -174,7 +185,8 @@ def run_harvest(
             latent_tensor,
             sampler,
             sigmas,
-            callback=_capture_callback,
+            denoise_mask=latent_image.get("noise_mask"),
+            callback=sample_callback,
             disable_pbar=not comfy.utils.PROGRESS_BAR_ENABLED,
             seed=getattr(noise, "seed", 42),
         )
@@ -188,6 +200,8 @@ def run_harvest(
             ),
             latent_image,
         )
+
+    observers.finish(result)
 
     if capture_count == 0:
         if first_residual_error is not None:

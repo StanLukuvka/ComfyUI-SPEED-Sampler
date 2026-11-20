@@ -12,8 +12,8 @@ def aligned_sigma(sigma: float, resolution_ratio: float) -> tuple[float, float]:
     ratio = float(resolution_ratio)
     if not 0.0 < q < 1.0:
         raise ValueError("transition sigma must be between zero and one")
-    if ratio <= 1.0:
-        raise ValueError("resolution ratio must be greater than one")
+    if ratio <= 0.0 or ratio == 1.0:   # below one: a custom plan steps down a size
+        raise ValueError("resolution ratio must be positive and not one")
     kappa = ratio / (1.0 + (ratio - 1.0) * q)
     return kappa, q * kappa
 

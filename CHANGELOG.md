@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented here. New releases should be added above older ones.
 
+## [Unreleased]
+
+### Added
+
+- Extension points for packs that build on SPEED (`speed_scripts/hooks.py`). Nothing changes unless something registers: with nothing registered, outputs are bit-identical to before.
+  - `register_noise_policy(name, start)` adds a `noise_policy`. `direct_coarse` and `coupled_full_grid` are now registered the same way.
+  - `register_step_observer(factory)` sees every step and the final latent of each SPEED and Harvest run, for analysis tools. An observer that raises is dropped; sampling carries on.
+  - `run_speed_pipeline(plan_fn=...)` replaces `plan_stages` with a custom `StagePlan`. Its stages may be larger than the latent and step down to it: transitions now also go to a smaller size (lower bands kept, `aligned_sigma` accepts a ratio below 1). A source image (image-to-image, LTX image-to-video) still needs every stage to fit the latent, and stops with an error before sampling otherwise.
+  - Each family has `spatial_factor`, pixels per latent cell (H3 16, LTX-2.x 32, image models from their latent format).
+
+### Fixed
+
+- Sigma Harvest now passes the latent's `noise_mask` to the sampler, as SamplerCustomAdvanced does, so an LTX image-to-video Harvest keeps its first frame.
+
 ## [2.0.0] - Unreleased
 
 ### Highlights

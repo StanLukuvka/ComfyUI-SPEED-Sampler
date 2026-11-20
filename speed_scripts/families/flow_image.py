@@ -76,6 +76,8 @@ class FlowImageFamily:
         self.model = _model(guider)
         latent_format = guider.model_patcher.get_model_object("latent_format")
         self.frame_axis = getattr(latent_format, "latent_dimensions", 2) == 3
+        # Pixels per latent cell (8 for SD/Flux/Krea 2, 16 for Flux 2 and MiniMax-H3-Image).
+        self.spatial_factor = int(getattr(latent_format, "spacial_downscale_ratio", 8))
 
     def split(self, samples):
         if getattr(samples, "is_nested", False):
